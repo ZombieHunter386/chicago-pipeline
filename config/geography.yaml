@@ -1,0 +1,21 @@
+# Target geography for the Chicago Multifamily Pipeline.
+# Defined as a polygon of vertex coordinates (lat, lng).
+# Edit this file and re-run fetch to expand/narrow the search area.
+
+name: "Lincoln Park / Lakeview / adjacent"
+
+# Polygon vertices, in order, closing back to the first point.
+# Order: NW corner → NE → SE → SW → NW.
+polygon:
+  - [41.9540, -87.6880]   # NW: Irving Park & Western
+  - [41.9540, -87.6380]   # NE: Irving Park & Lake Michigan (approx shoreline)
+  - [41.9244, -87.6240]   # SE: Fullerton & Lake Michigan (approx shoreline)
+  - [41.9244, -87.6880]   # SW: Fullerton & Western
+
+# Bounding box derived from polygon — used for Socrata $where prefiltering.
+# Computed once and stored here so every source uses identical bounds.
+bbox:
+  min_lat: 41.9244
+  max_lat: 41.9540
+  min_lng: -87.6880
+  max_lng: -87.6240
