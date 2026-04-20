@@ -1,0 +1,14 @@
+[
+  {"pin": "14210010010000", "year": "2025", "pin10": "1421001001",
+   "class": "211", "lat": "41.94", "lon": "-87.65", "ward_num": "44",
+   "zip_code": "60657", "tax_tif_district_num": null,
+   "tax_tif_district_name": null, "township_code": "76", "nbhd_code": "10"},
+  {"pin": "14210010020000", "year": "2025", "pin10": "1421001002",
+   "class": "203", "lat": "41.93", "lon": "-87.66", "ward_num": "32",
+   "zip_code": "60614", "tax_tif_district_num": null,
+   "tax_tif_district_name": null, "township_code": "76", "nbhd_code": "10"},
+  {"pin": "99999990000000", "year": "2025", "pin10": "9999999000",
+   "class": "211", "lat": "30.00", "lon": "-90.00", "ward_num": "0",
+   "zip_code": "00000", "tax_tif_district_num": null,
+   "tax_tif_district_name": null, "township_code": "00", "nbhd_code": "00"}
+]
