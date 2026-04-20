@@ -72,7 +72,9 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient) -> int:
     open_count: dict[str, int] = defaultdict(int)
     oldest_open: dict[str, str] = {}
     for r in raw_rows:
-        if (r.get("violation_status") or "").upper() != "OPEN":
+        # Real dataset uses "OPEN", "OPEN - HEARING", "OPEN - REFERRED TO LAW",
+        # etc. Match any status that starts with "OPEN".
+        if not (r.get("violation_status") or "").upper().startswith("OPEN"):
             continue
         if not r["latitude"] or not r["longitude"]:
             continue

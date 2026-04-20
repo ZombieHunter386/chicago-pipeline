@@ -63,6 +63,16 @@ def test_is_llc_detects_common_patterns():
     assert is_llc(None) is False
 
 
+def test_is_llc_detects_dotted_forms():
+    """Real assessor data uses dotted forms like 'L.L.C.' and 'L.P.'."""
+    from sources.assessor_addresses import is_llc
+    assert is_llc("ABC L.L.C.") is True
+    assert is_llc("Smith L.P.") is True
+    assert is_llc("XYZ L.L.P.") is True
+    assert is_llc("Acme Inc.") is True
+    assert is_llc("BigCo Corp.") is True
+
+
 def test_is_absentee_normalizes_addresses():
     from sources.assessor_addresses import is_absentee
     assert is_absentee("100 W DIVERSEY", "PO BOX 4421") is True

@@ -64,7 +64,11 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient) -> int:
     # Most recent arm's-length sale per PIN
     by_pin: dict[str, list[dict]] = defaultdict(list)
     for r in raw_rows:
-        if r["sale_filter_same_sale_within_365"] or r["sale_filter_less_than_10k"]:
+        # Arm's-length filter: skip same-sale-within-365, <$10k, and non-warranty deeds
+        # (quitclaim, sheriff's deed, etc. — not market transactions).
+        if (r["sale_filter_same_sale_within_365"]
+                or r["sale_filter_less_than_10k"]
+                or r["sale_filter_deed_type"]):
             continue
         if not r["sale_date"]:
             continue

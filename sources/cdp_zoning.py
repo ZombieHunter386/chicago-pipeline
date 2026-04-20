@@ -4,6 +4,7 @@ import json
 from datetime import datetime, UTC
 from pathlib import Path
 import geopandas as gpd
+import pandas as pd
 from shapely.geometry import shape, Point
 from pipeline.config import GeographyConfig, CONFIG_DIR
 from pipeline.db import upsert_rows, get_connection
@@ -70,14 +71,23 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient,
     )
 
     joined = gpd.sjoin(points, zones_gdf, how="left", predicate="within")
+    # Dedup to one row per pin — overlapping zones (rare: layered PDs) would
+    # otherwise cause non-deterministic last-write-wins UPDATEs.
+    joined = joined.drop_duplicates(subset=["pin"], keep="first")
 
     conn = get_connection(db_path)
     try:
         for _, j in joined.iterrows():
-            zc = j.get("zone_class")
+            zc_raw = j.get("zone_class")
+            # Left sjoin yields NaN (float) for parcels outside any polygon.
+            # Coerce to None so it doesn't serialize as the string "nan" into TEXT.
+            zc = None if zc_raw is None or pd.isna(zc_raw) else zc_raw
             zi = zone_info.get(zc) if zc else None
             max_far = zi.max_far if zi else None
-            allows_mf = 1 if (zi and zi.allows_multifamily) else 0
+            # When zone is unknown, leave allows_multifamily_by_right as NULL
+            # rather than asserting 0 ("does not allow"). Only write a value
+            # when we have a real zone lookup.
+            allows_mf = None if zi is None else (1 if zi.allows_multifamily else 0)
             built = j["built_far"]
             far_gap = (max_far / built) if (max_far and built and built > 0) else None
             conn.execute("""

@@ -77,6 +77,9 @@ class SocrataClient:
                     sleep_for = self.retry_backoff * (2 ** attempt)
                     time.sleep(sleep_for)
                     continue
+                # 4xx (other than 429) are client errors — don't retry.
+                if 400 <= resp.status_code < 500:
+                    raise SocrataError(f"Client error {resp.status_code}: {url} {params} {resp.text[:200]}")
                 resp.raise_for_status()
                 return resp.json()
             except requests.RequestException as e:

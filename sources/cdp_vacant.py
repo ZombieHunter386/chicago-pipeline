@@ -1,12 +1,15 @@
 """Source 2E — Chicago Vacant and Abandoned Buildings."""
 from __future__ import annotations
+import logging
 from datetime import datetime, UTC
 from pathlib import Path
 from math import radians, sin, cos, sqrt, atan2
 from pipeline.config import GeographyConfig
 from pipeline.db import upsert_rows, get_connection
 from pipeline.geography import filter_by_polygon, bbox_where_clause
-from pipeline.socrata import SocrataClient
+from pipeline.socrata import SocrataClient, SocrataError
+
+log = logging.getLogger(__name__)
 
 
 DATASET_ID = "7nii-7srd"
@@ -49,8 +52,10 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient) -> int:
                 "longitude": _f(r.get("longitude")),
                 "fetched_at": fetched_at,
             })
-    except Exception:
-        # Sparse dataset — failure is acceptable
+    except SocrataError as e:
+        # Sparse dataset — a missing/empty response is acceptable, but log
+        # the specific Socrata error rather than silently hiding all failures.
+        log.warning("cdp_vacant fetch failed: %s", e)
         return 0
 
     raw_rows = filter_by_polygon(raw_rows, geo, lat_field="latitude", lng_field="longitude")

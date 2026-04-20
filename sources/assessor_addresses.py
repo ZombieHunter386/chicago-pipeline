@@ -12,8 +12,13 @@ DATASET_ID = "3723-97qp"
 TABLE = "raw_assessor_addresses"
 SOURCE_NAME = "assessor_addresses"
 
+# Keyword list uses no trailing dots inside alternatives; we allow an optional
+# trailing `.` after the end `\b` so dotted forms like "L.L.C.", "L.P.", "Inc."
+# still match. Using `\b` with a trailing `.` was the bug — `\b` requires a
+# word char on one side, and a trailing `.` after the final letter makes that
+# side a non-word character, so the boundary fails.
 LLC_PATTERN = re.compile(
-    r"\b(LLC|L\.L\.C\.|CORP|CORPORATION|INC|INCORPORATED|TRUST|LP|L\.P\.|PARTNERS|PARTNERSHIP|LLP|L\.L\.P\.|HOLDINGS|REALTY|PROPERTIES)\b",
+    r"\b(LLC|L\.L\.C|CORP|CORPORATION|INC|INCORPORATED|TRUST|LP|L\.P|PARTNERS|PARTNERSHIP|LLP|L\.L\.P|HOLDINGS|REALTY|PROPERTIES)\b\.?",
     re.IGNORECASE,
 )
 

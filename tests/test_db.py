@@ -98,6 +98,32 @@ def test_upsert_rows_empty_list_is_noop(tmp_path):
     assert n == 0
 
 
+def test_upsert_rows_preserves_columns_on_conflict(tmp_path):
+    db = tmp_path / "test.db"
+    init_db(db)
+    # Create parcels table row with first_seen_date
+    conn = get_connection(db)
+    conn.execute(
+        "INSERT INTO parcels (pin, first_seen_date, last_updated_date) VALUES (?, ?, ?)",
+        ("P1", "2026-01-01", "2026-01-01"),
+    )
+    conn.commit()
+    conn.close()
+    # Upsert with preserve_columns should not overwrite first_seen_date
+    upsert_rows(
+        db,
+        "parcels",
+        [{"pin": "P1", "first_seen_date": "2026-04-19", "last_updated_date": "2026-04-19"}],
+        key_columns=["pin"],
+        preserve_columns=["first_seen_date"],
+    )
+    conn = get_connection(db)
+    row = conn.execute("SELECT first_seen_date, last_updated_date FROM parcels WHERE pin='P1'").fetchone()
+    assert row[0] == "2026-01-01"
+    assert row[1] == "2026-04-19"
+    conn.close()
+
+
 def test_upsert_rows_composite_key(tmp_path):
     db = tmp_path / "test.db"
     init_db(db)

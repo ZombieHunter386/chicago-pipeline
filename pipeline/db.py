@@ -390,21 +390,25 @@ def upsert_rows(
     table: str,
     rows: Iterable[dict],
     key_columns: list[str],
+    preserve_columns: list[str] | None = None,
 ) -> int:
     """
     INSERT ... ON CONFLICT(key_columns) DO UPDATE SET ...
     Each row is a dict; keys must match column names.
+    Columns in preserve_columns are inserted on first write but NOT overwritten
+    on conflict (useful for first_seen_date-style fields).
     Returns number of rows processed.
     """
     rows = list(rows)
     if not rows:
         return 0
 
+    preserve = set(preserve_columns or [])
     columns = list(rows[0].keys())
     placeholders = ", ".join(f":{c}" for c in columns)
     col_list = ", ".join(columns)
     update_assignments = ", ".join(
-        f"{c}=excluded.{c}" for c in columns if c not in key_columns
+        f"{c}=excluded.{c}" for c in columns if c not in key_columns and c not in preserve
     )
     conflict_cols = ", ".join(key_columns)
 

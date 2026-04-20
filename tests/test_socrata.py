@@ -54,6 +54,18 @@ def test_fetch_retries_on_500_then_succeeds():
 
 
 @responses.activate
+def test_fetch_does_not_retry_on_4xx():
+    url = "https://data.cityofchicago.org/resource/xyz-456.json"
+    responses.add(responses.GET, url, status=404, body="not found")
+    client = SocrataClient(domain="data.cityofchicago.org", app_token="TKN",
+                           retry_backoff=0.0, max_retries=5)
+    with pytest.raises(SocrataError):
+        list(client.fetch("xyz-456", limit=50000))
+    # Only one call should have been made (no retries on 4xx).
+    assert len(responses.calls) == 1
+
+
+@responses.activate
 def test_fetch_raises_after_max_retries():
     url = "https://data.cityofchicago.org/resource/xyz-456.json"
     for _ in range(5):

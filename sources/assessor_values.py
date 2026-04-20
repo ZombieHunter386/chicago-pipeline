@@ -11,7 +11,6 @@ from pipeline.socrata import SocrataClient
 DATASET_ID = "uzyt-m557"
 TABLE = "raw_assessor_values"
 SOURCE_NAME = "assessor_values"
-HISTORY_YEARS = 5
 
 
 def _f(v):
