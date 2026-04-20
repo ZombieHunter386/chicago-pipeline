@@ -1,0 +1,12 @@
+[
+  {"permit_": "100001", "permit_type": "PERMIT - RENOVATION/ALTERATION",
+   "issue_date": "2018-05-12T00:00:00.000",
+   "street_number": "100", "street_direction": "W", "street_name": "DIVERSEY PKWY",
+   "work_description": "Reroof", "reported_cost": "8500", "community_area": "6", "ward": "44",
+   "latitude": "41.94001", "longitude": "-87.65001"},
+  {"permit_": "100002", "permit_type": "PERMIT - NEW CONSTRUCTION",
+   "issue_date": "2022-09-30T00:00:00.000",
+   "street_number": "200", "street_direction": "N", "street_name": "HALSTED",
+   "work_description": "New 4-unit", "reported_cost": "850000", "community_area": "7", "ward": "32",
+   "latitude": "41.93001", "longitude": "-87.66001"}
+]
