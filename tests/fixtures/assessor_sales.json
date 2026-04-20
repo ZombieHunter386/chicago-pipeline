@@ -1,0 +1,20 @@
+[
+  {"pin": "14210010010000", "sale_date": "2004-03-15T00:00:00.000",
+   "sale_price": "385000", "seller_name": "PRIOR LLC", "buyer_name": "RACINE HOLDINGS LLC",
+   "deed_type": "Warranty", "doc_no": "0408001",
+   "is_multisale": "false", "num_parcels_sale": "1",
+   "sale_filter_same_sale_within_365": "false", "sale_filter_less_than_10k": "false",
+   "sale_filter_deed_type": "false"},
+  {"pin": "14210010010000", "sale_date": "1999-08-01T00:00:00.000",
+   "sale_price": "150000", "seller_name": "OLDER LLC", "buyer_name": "PRIOR LLC",
+   "deed_type": "Warranty", "doc_no": "9908001",
+   "is_multisale": "false", "num_parcels_sale": "1",
+   "sale_filter_same_sale_within_365": "false", "sale_filter_less_than_10k": "false",
+   "sale_filter_deed_type": "false"},
+  {"pin": "14210010020000", "sale_date": "2018-06-12T00:00:00.000",
+   "sale_price": "475000", "seller_name": "X", "buyer_name": "JOHN SMITH",
+   "deed_type": "Warranty", "doc_no": "1806001",
+   "is_multisale": "false", "num_parcels_sale": "1",
+   "sale_filter_same_sale_within_365": "false", "sale_filter_less_than_10k": "false",
+   "sale_filter_deed_type": "false"}
+]
