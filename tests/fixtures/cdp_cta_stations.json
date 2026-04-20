@@ -1,0 +1,6 @@
+[
+  {"station_id": "41320", "longname": "Diversey", "lines": "Brown, Purple",
+   "location": {"type": "Point", "coordinates": [-87.6533, 41.9324]}},
+  {"station_id": "41290", "longname": "Belmont", "lines": "Red, Brown, Purple",
+   "location": {"type": "Point", "coordinates": [-87.6531, 41.9397]}}
+]
