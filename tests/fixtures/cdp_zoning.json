@@ -1,0 +1,7 @@
+[
+  {"objectid": "z1", "zone_class": "RT-4", "pd_num": null,
+   "the_geom": {"type": "MultiPolygon",
+                "coordinates": [[[[-87.67, 41.95], [-87.62, 41.95],
+                                  [-87.62, 41.92], [-87.67, 41.92],
+                                  [-87.67, 41.95]]]]}}
+]
