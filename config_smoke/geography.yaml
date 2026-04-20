@@ -1,0 +1,16 @@
+# Smoke-test geography: ~4 blocks around Diversey + Racine.
+# Used for end-to-end live-API verification; see Task 23 of the pipeline plan.
+
+name: "Smoke test — Racine/Diversey"
+
+polygon:
+  - [41.9340, -87.6600]
+  - [41.9340, -87.6550]
+  - [41.9310, -87.6550]
+  - [41.9310, -87.6600]
+
+bbox:
+  min_lat: 41.9310
+  max_lat: 41.9340
+  min_lng: -87.6600
+  max_lng: -87.6550
