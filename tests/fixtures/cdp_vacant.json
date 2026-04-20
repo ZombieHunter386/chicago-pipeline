@@ -1,0 +1,8 @@
+[
+  {"service_request_number": "SR1",
+   "date_service_request_was_received": "2024-11-20T00:00:00.000",
+   "location_of_building_on_the_lot": "FRONT",
+   "is_the_building_dangerous_or_hazardous": "Y",
+   "address_street_number": "200", "address_street_direction": "N", "address_street_name": "HALSTED",
+   "latitude": "41.93", "longitude": "-87.66"}
+]
