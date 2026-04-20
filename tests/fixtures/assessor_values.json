@@ -1,0 +1,11 @@
+[
+  {"pin": "14210010010000", "year": "2025", "mailed_bldg": "100000", "mailed_land": "200000", "mailed_tot": "300000",
+   "certified_bldg": "100000", "certified_land": "200000", "certified_tot": "300000",
+   "board_bldg": "95000", "board_land": "192430", "board_tot": "287430", "board_hie": "0"},
+  {"pin": "14210010010000", "year": "2024", "mailed_bldg": null, "mailed_land": null, "mailed_tot": null,
+   "certified_bldg": null, "certified_land": null, "certified_tot": null,
+   "board_bldg": "90000", "board_land": "175000", "board_tot": "265000", "board_hie": "0"},
+  {"pin": "14210010010000", "year": "2020", "mailed_bldg": null, "mailed_land": null, "mailed_tot": null,
+   "certified_bldg": null, "certified_land": null, "certified_tot": null,
+   "board_bldg": "75000", "board_land": "139000", "board_tot": "214000", "board_hie": "0"}
+]
