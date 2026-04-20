@@ -383,3 +383,46 @@ def init_db(db_path: Path) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def upsert_rows(
+    db_path: Path,
+    table: str,
+    rows: Iterable[dict],
+    key_columns: list[str],
+) -> int:
+    """
+    INSERT ... ON CONFLICT(key_columns) DO UPDATE SET ...
+    Each row is a dict; keys must match column names.
+    Returns number of rows processed.
+    """
+    rows = list(rows)
+    if not rows:
+        return 0
+
+    columns = list(rows[0].keys())
+    placeholders = ", ".join(f":{c}" for c in columns)
+    col_list = ", ".join(columns)
+    update_assignments = ", ".join(
+        f"{c}=excluded.{c}" for c in columns if c not in key_columns
+    )
+    conflict_cols = ", ".join(key_columns)
+
+    if update_assignments:
+        sql = (
+            f"INSERT INTO {table} ({col_list}) VALUES ({placeholders}) "
+            f"ON CONFLICT({conflict_cols}) DO UPDATE SET {update_assignments}"
+        )
+    else:
+        sql = (
+            f"INSERT INTO {table} ({col_list}) VALUES ({placeholders}) "
+            f"ON CONFLICT({conflict_cols}) DO NOTHING"
+        )
+
+    conn = get_connection(db_path)
+    try:
+        conn.executemany(sql, rows)
+        conn.commit()
+    finally:
+        conn.close()
+    return len(rows)
