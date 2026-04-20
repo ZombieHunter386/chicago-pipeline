@@ -1,0 +1,18 @@
+[
+  {"pin": "14210010010000", "year": "2025", "class": "211",
+   "char_land_sf": "3750", "char_bldg_sf": "2400", "char_yrblt": "1923",
+   "char_cnst_qlty": "Average", "char_repair_cnd": "Fair", "cdu": "Fair",
+   "char_beds": "8", "char_rooms": "16", "char_fbath": "4", "char_hbath": "0",
+   "char_type_resd": "2 Story", "char_ext_wall": "Brick", "char_heat": "Steam",
+   "char_bsmt": "Y", "char_bsmt_fin": "N", "char_gar1_att": "N",
+   "char_gar1_area": "0", "char_use": "Multi-Family", "char_site": "Average",
+   "char_air": "None", "pin_is_multicard": "false", "pin_num_cards": "1"},
+  {"pin": "14210010020000", "year": "2025", "class": "203",
+   "char_land_sf": "5000", "char_bldg_sf": "3000", "char_yrblt": "1958",
+   "char_cnst_qlty": "Good", "char_repair_cnd": "Average", "cdu": "Good",
+   "char_beds": "6", "char_rooms": "12", "char_fbath": "3", "char_hbath": "1",
+   "char_type_resd": "3 Story", "char_ext_wall": "Brick", "char_heat": "Forced Air",
+   "char_bsmt": "Y", "char_bsmt_fin": "Y", "char_gar1_att": "N",
+   "char_gar1_area": "0", "char_use": "Multi-Family", "char_site": "Good",
+   "char_air": "Central", "pin_is_multicard": "false", "pin_num_cards": "1"}
+]
