@@ -40,7 +40,7 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient) -> int:
     # Pull most recent year only for each PIN by ordering desc and de-duping
     raw_rows: list[dict] = []
     seen: set[tuple[str, str]] = set()
-    for r in client.fetch(DATASET_ID, order="year DESC"):
+    for r in client.fetch_by_pins(DATASET_ID, known_pins, order="year DESC"):
         pin = r.get("pin")
         year = r.get("year")
         if pin not in known_pins:

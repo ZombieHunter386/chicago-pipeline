@@ -77,9 +77,14 @@ def _run(source_name: str, fn: Callable, db_path: Path, *args) -> SourceResult:
         return SourceResult(source_name, "error", 0, dur, str(e))
 
 
-def run_all(geo: GeographyConfig, db_path: Path, app_token: str) -> list[SourceResult]:
-    cook = SocrataClient(domain=COOK_DOMAIN, app_token=app_token, rate_limit_sleep=0.1)
-    cdp = SocrataClient(domain=CDP_DOMAIN, app_token=app_token, rate_limit_sleep=0.1)
+def run_all(geo: GeographyConfig, db_path: Path, app_token: str,
+            api_key_id: str = "", api_key_secret: str = "") -> list[SourceResult]:
+    cook = SocrataClient(domain=COOK_DOMAIN, app_token=app_token,
+                         api_key_id=api_key_id, api_key_secret=api_key_secret,
+                         rate_limit_sleep=0.1)
+    cdp = SocrataClient(domain=CDP_DOMAIN, app_token=app_token,
+                        api_key_id=api_key_id, api_key_secret=api_key_secret,
+                        rate_limit_sleep=0.1)
 
     results: list[SourceResult] = []
     # Order matters — parcels first, then joining sources
@@ -108,8 +113,10 @@ def main():
 
     load_dotenv()
     app_token = os.environ.get("SOCRATA_APP_TOKEN", "")
-    if not app_token:
-        print("WARNING: SOCRATA_APP_TOKEN is not set — requests will be rate-limited.")
+    api_key_id = os.environ.get("SOCRATA_API_KEY_ID", "")
+    api_key_secret = os.environ.get("SOCRATA_API_KEY_SECRET", "")
+    if not app_token and not (api_key_id and api_key_secret):
+        print("WARNING: no Socrata credentials set — requests will be rate-limited.")
 
     config_dir = Path(args.config_dir) if args.config_dir else CONFIG_DIR
     db_path = Path(args.db) if args.db else Path(os.environ.get("PIPELINE_DB_PATH", "data/pipeline.db"))
@@ -117,7 +124,7 @@ def main():
     init_db(db_path)
     geo = get_geography(config_dir)
 
-    results = run_all(geo, db_path, app_token)
+    results = run_all(geo, db_path, app_token, api_key_id=api_key_id, api_key_secret=api_key_secret)
 
     print("\n=== Summary ===")
     for r in results:

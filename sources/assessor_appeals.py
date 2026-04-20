@@ -31,7 +31,7 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient) -> int:
 
     raw_rows = []
     counts: Counter[str] = Counter()
-    for r in client.fetch(DATASET_ID):
+    for r in client.fetch_by_pins(DATASET_ID, known_pins):
         pin = r.get("pin")
         if pin not in known_pins:
             continue

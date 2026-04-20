@@ -39,7 +39,7 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient) -> int:
         return 0
 
     raw_rows = []
-    for r in client.fetch(DATASET_ID, order="sale_date DESC"):
+    for r in client.fetch_by_pins(DATASET_ID, known_pins, order="sale_date DESC"):
         pin = r.get("pin")
         if pin not in known_pins:
             continue
