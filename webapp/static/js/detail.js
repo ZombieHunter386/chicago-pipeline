@@ -87,8 +87,8 @@
     return renderSection('Property Facts', [
       ['PIN', p.pin],
       ['Address', p.address],
-      ['Lot Size', p.lot_size_sf ? `${Math.round(p.lot_size_sf).toLocaleString()} SF` : null],
-      ['Building SF', p.building_sf ? `${Math.round(p.building_sf).toLocaleString()} SF` : null],
+      ['Lot Size', p.lot_size_sf != null ? `${Math.round(p.lot_size_sf).toLocaleString()} SF` : null],
+      ['Building SF', p.building_sf != null ? `${Math.round(p.building_sf).toLocaleString()} SF` : null],
       ['Year Built', p.year_built],
       ['Ward', p.ward_num],
       ['Class', p.property_class],
@@ -104,7 +104,7 @@
       ['Owner', p.owner_name],
       ['Type', ownerTypeLabel(p)],
       ['Mailing Address', p.mail_address],
-      ['Hold Duration', p.hold_duration_years ? `${Math.round(p.hold_duration_years)} years` : null],
+      ['Hold Duration', p.hold_duration_years != null ? `${Math.round(p.hold_duration_years)} years` : null],
       ['Registered Agent', contact.role === 'registered_agent' ? contact.name : null],
       ['Phone', contact.phone],
       ['Email', contact.email],
@@ -122,10 +122,10 @@
       ['Allows Multifamily', allowsMf],
       ['Max FAR', p.max_far],
       ['Built FAR', p.built_far],
-      ['FAR Gap', p.far_gap ? `${p.far_gap.toFixed(1)}x underbuilt` : null],
+      ['FAR Gap', p.far_gap != null ? `${p.far_gap.toFixed(1)}x underbuilt` : null],
       ['TIF District', p.tif_district],
       ['Nearest CTA', p.cta_nearest_station],
-      ['CTA Distance', p.cta_distance_ft ? `${Math.round(p.cta_distance_ft)} ft` : null],
+      ['CTA Distance', p.cta_distance_ft != null ? `${Math.round(p.cta_distance_ft)} ft` : null],
     ]);
   }
 
@@ -144,11 +144,11 @@
 
   function sectionFinancials(p) {
     return renderSection('Financials', [
-      ['Assessed Total', p.assessed_total ? `$${Math.round(p.assessed_total).toLocaleString()}` : null],
-      ['Est. Annual Tax', p.estimated_annual_tax ? `$${Math.round(p.estimated_annual_tax).toLocaleString()}` : null],
+      ['Assessed Total', p.assessed_total != null ? `$${Math.round(p.assessed_total).toLocaleString()}` : null],
+      ['Est. Annual Tax', p.estimated_annual_tax != null ? `$${Math.round(p.estimated_annual_tax).toLocaleString()}` : null],
       ['Tax Change (1yr)', p.tax_increase_pct_1yr != null ? `${p.tax_increase_pct_1yr.toFixed(1)}%` : null],
       ['Tax Change (5yr)', p.tax_increase_pct_5yr != null ? `${p.tax_increase_pct_5yr.toFixed(1)}%` : null],
-      ['Last Sale Price', p.last_sale_price ? `$${Math.round(p.last_sale_price).toLocaleString()}` : null],
+      ['Last Sale Price', p.last_sale_price != null ? `$${Math.round(p.last_sale_price).toLocaleString()}` : null],
       ['Last Sale Date', p.last_sale_date],
     ]);
   }
