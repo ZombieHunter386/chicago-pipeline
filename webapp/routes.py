@@ -1,5 +1,6 @@
 from __future__ import annotations
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 from flask import Flask, abort, current_app, jsonify, render_template, request
@@ -13,6 +14,10 @@ from webapp.parcel_query import (
 
 
 UI_FILTERS_YAML = Path(__file__).resolve().parent.parent / "config" / "ui_filters.yaml"
+
+DEFAULT_PAGE_SIZE = 20
+MAX_PAGE_SIZE = 1000
+MAP_MAX_PINS = 5000
 
 
 def register(app: Flask) -> None:
@@ -34,13 +39,18 @@ def register(app: Flask) -> None:
     def api_parcels():
         filters = _parse_filters(request.args)
         stage = request.args.get("stage") or None
-        limit = min(int(request.args.get("limit", 20)), 1000)
-        offset = int(request.args.get("offset", 0))
+        try:
+            limit = int(request.args.get("limit", DEFAULT_PAGE_SIZE))
+            offset = int(request.args.get("offset", 0))
+        except ValueError:
+            abort(400)
+        limit = max(1, min(limit, MAX_PAGE_SIZE))
+        offset = max(0, offset)
 
         list_sql, list_params = build_parcel_query(filters, stage, limit, offset)
         count_sql, count_params = build_count_query(filters, stage)
 
-        with _conn() as conn:
+        with closing(_conn()) as conn:
             parcels = [dict(r) for r in conn.execute(list_sql, list_params)]
             total = conn.execute(count_sql, count_params).fetchone()["n"]
 
@@ -48,7 +58,7 @@ def register(app: Flask) -> None:
 
     @app.get("/api/parcels/<pin>")
     def api_parcel_detail(pin: str):
-        with _conn() as conn:
+        with closing(_conn()) as conn:
             row = conn.execute(
                 "SELECT * FROM parcels WHERE pin = ?", (pin,)
             ).fetchone()
@@ -71,10 +81,10 @@ def register(app: Flask) -> None:
     def api_map_data():
         filters = _parse_filters(request.args)
         stage = request.args.get("stage") or None
-        # Map gets up to 5000 pins (all of smoke.db)
-        sql, params = build_parcel_query(filters, stage, limit=5000, offset=0)
+        # Map gets up to MAP_MAX_PINS pins
+        sql, params = build_parcel_query(filters, stage, limit=MAP_MAX_PINS, offset=0)
 
-        with _conn() as conn:
+        with closing(_conn()) as conn:
             rows = [dict(r) for r in conn.execute(sql, params)]
 
         features = []
