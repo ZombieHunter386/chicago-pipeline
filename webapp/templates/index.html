@@ -2,9 +2,81 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Chicago Multifamily Pipeline — Review UI</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
 </head>
 <body>
-<h1>Chicago Multifamily Pipeline</h1>
+
+<div class="top-bar">
+  <h1>Chicago Multifamily Pipeline</h1>
+  <div class="meta" id="top-bar-meta">Score v N/A · loading… · Top 20 shown</div>
+</div>
+
+{% if feature_outreach %}
+<div class="due-today-banner" id="due-today-banner">
+  <div class="label">DUE TODAY</div>
+  <div id="due-badges"></div>
+</div>
+{% endif %}
+
+<div class="main"{% if not feature_outreach %} style="height: calc(100vh - 56px);"{% endif %}>
+
+  <!-- LEFT: Ranked List -->
+  <div class="left-panel">
+    <div class="panel-header">
+      <h2>Ranked Parcels</h2>
+      <span class="count-label" id="count-label">— of —</span>
+    </div>
+    <div class="filter-row" id="stage-pills"></div>
+    <div class="filter-toggle-row">
+      <button class="filter-toggle-btn" id="filter-toggle">
+        <span class="arrow">▸</span> Filters <span class="active-filter-count" id="active-filter-count">0</span>
+      </button>
+      <button class="filter-toggle-btn" id="clear-filters" style="color:#8b949e; font-size:10px;">Clear all</button>
+    </div>
+    <div class="filter-panel" id="filter-panel"></div>
+    <div class="parcel-list" id="parcel-list"></div>
+    <div style="padding: 8px 16px; text-align: center; border-bottom: 1px solid #30363d;">
+      <button class="btn btn-sm btn-outline" id="load-more" style="width:100%;">Load more</button>
+    </div>
+    {% if feature_outreach %}
+    <div class="batch-actions">
+      <button class="btn btn-primary">Draft Outreach for Selected</button>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- CENTER: Map -->
+  <div class="center-panel">
+    <div id="map"></div>
+    <div class="layer-toggles">
+      <h3>Layers</h3>
+      <label class="layer-toggle"><input type="checkbox" checked data-layer="top"> <span class="layer-dot" style="background:#238636"></span> Top-N scored</label>
+      <label class="layer-toggle"><input type="checkbox" checked data-layer="consolidated"> <span class="layer-dot" style="background:#a855f7"></span> Consolidated</label>
+      <label class="layer-toggle"><input type="checkbox" checked data-layer="outreach"> <span class="layer-dot" style="background:#58a6ff"></span> Outreach sent</label>
+      <label class="layer-toggle"><input type="checkbox" checked data-layer="listed"> <span class="layer-dot" style="background:#f0883e"></span> Listed</label>
+      <label class="layer-toggle"><input type="checkbox" checked data-layer="other"> <span class="layer-dot" style="background:#484f58"></span> All others</label>
+    </div>
+  </div>
+
+  <!-- RIGHT: Detail Panel -->
+  <div class="right-panel" id="detail-panel">
+    <div class="detail-section" style="color:#8b949e; font-size:12px;">
+      Select a parcel to see details.
+    </div>
+  </div>
+</div>
+
+<script>
+  window.FEATURE_OUTREACH = {{ feature_outreach|tojson }};
+</script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="{{ url_for('static', filename='js/filters.js') }}"></script>
+<script src="{{ url_for('static', filename='js/list.js') }}"></script>
+<script src="{{ url_for('static', filename='js/map.js') }}"></script>
+<script src="{{ url_for('static', filename='js/detail.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>
