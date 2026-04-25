@@ -1,0 +1,93 @@
+# Filter panel config for the Review UI.
+# Adding a new filter = add an entry pointing at a column in `parcels`.
+# The UI introspects the column's SQLite type and distinct values at load time.
+#
+# Control type is inferred from the SQLite column type if omitted:
+#   INTEGER/REAL       -> range (unless values are only 0/1 -> checkbox)
+#   TEXT (date-like)   -> date_range   (explicit override via `type: date_range`)
+#   TEXT (categorical) -> dropdown
+#   TEXT (free-form)   -> text_search  (explicit override via `type: text_search`)
+# Explicit `type:` always wins over inference.
+
+filter_groups:
+  - group: Score
+    filters:
+      - column: score
+        label: Score
+        type: range
+
+  - group: Owner
+    filters:
+      - column: is_absentee
+        label: Absentee owner
+        type: checkbox
+      - column: is_llc
+        label: LLC ownership
+        type: checkbox
+      - column: owner_name
+        label: Owner name
+        type: text_search
+
+  - group: Property
+    filters:
+      - column: property_class
+        label: Property class
+        type: dropdown
+      - column: lot_size_sf
+        label: Lot size (SF)
+        type: range
+      - column: year_built
+        label: Year built
+        type: range
+      - column: condition
+        label: Condition
+        type: dropdown
+
+  - group: Zoning
+    filters:
+      - column: zone_class
+        label: Zone class
+        type: dropdown
+      - column: allows_multifamily_by_right
+        label: Multifamily by right
+        type: checkbox
+      - column: far_gap
+        label: FAR gap
+        type: range
+      - column: tif_district
+        label: In TIF district
+        type: dropdown
+
+  - group: Motivation Signals
+    filters:
+      - column: tax_delinquent
+        label: Tax delinquent
+        type: checkbox
+      - column: open_violations_count
+        label: Open violations (min)
+        type: range
+      - column: has_vacancy_report
+        label: Vacancy report
+        type: checkbox
+      - column: years_since_last_permit
+        label: Years since last permit
+        type: range
+      - column: hold_duration_years
+        label: Hold duration (years)
+        type: range
+
+  - group: Financial
+    filters:
+      - column: assessed_total
+        label: Assessed value
+        type: range
+      - column: land_building_ratio
+        label: Land/bldg ratio
+        type: range
+      - column: tax_increase_pct_5yr
+        label: Tax increase 5yr (%)
+        type: range
+
+stage_pills:
+  column: stage
+  values: [scored, outreach, responded, introduced, dead]
