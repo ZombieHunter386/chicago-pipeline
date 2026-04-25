@@ -1,4 +1,6 @@
 # tests/conftest.py
+import shutil
+
 import pytest
 from pathlib import Path
 from pipeline.config import GeographyConfig
@@ -36,3 +38,16 @@ def cdp_client():
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+SMOKE_DB = Path(__file__).resolve().parent.parent / "data" / "smoke.db"
+
+
+@pytest.fixture
+def populated_db_path(tmp_path):
+    """Isolated copy of data/smoke.db (641 parcels) for webapp tests."""
+    if not SMOKE_DB.exists():
+        pytest.skip(f"smoke.db not present at {SMOKE_DB}")
+    dst = tmp_path / "smoke.db"
+    shutil.copy(SMOKE_DB, dst)
+    return dst
