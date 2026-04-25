@@ -136,8 +136,9 @@ function wireFilterToggle() {
   const panel = document.getElementById('filter-panel');
   btn.onclick = () => {
     panel.classList.toggle('open');
-    btn.querySelector('.arrow').textContent =
-      panel.classList.contains('open') ? '▾' : '▸';
+    const isOpen = panel.classList.contains('open');
+    btn.querySelector('.arrow').textContent = isOpen ? '▾' : '▸';
+    btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
   };
   document.getElementById('clear-filters').onclick = () => {
     window.FilterState.filters = {};

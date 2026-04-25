@@ -11,7 +11,7 @@
 
 <div class="top-bar">
   <h1>Chicago Multifamily Pipeline</h1>
-  <div class="meta" id="top-bar-meta">Score v N/A · loading… · Top 20 shown</div>
+  <div class="meta" id="top-bar-meta" aria-live="polite">Score v N/A · loading… · Top 20 shown</div>
 </div>
 
 {% if feature_outreach %}
@@ -24,15 +24,15 @@
 <div class="main"{% if not feature_outreach %} style="height: calc(100vh - 56px);"{% endif %}>
 
   <!-- LEFT: Ranked List -->
-  <div class="left-panel">
+  <aside class="left-panel" aria-label="Ranked parcels list">
     <div class="panel-header">
       <h2>Ranked Parcels</h2>
       <span class="count-label" id="count-label">— of —</span>
     </div>
     <div class="filter-row" id="stage-pills"></div>
     <div class="filter-toggle-row">
-      <button class="filter-toggle-btn" id="filter-toggle">
-        <span class="arrow">▸</span> Filters <span class="active-filter-count" id="active-filter-count">0</span>
+      <button class="filter-toggle-btn" id="filter-toggle" aria-expanded="false" aria-controls="filter-panel">
+        <span class="arrow" aria-hidden="true">▸</span> Filters <span class="active-filter-count" id="active-filter-count">0</span>
       </button>
       <button class="filter-toggle-btn" id="clear-filters" style="color:#8b949e; font-size:10px;">Clear all</button>
     </div>
@@ -46,27 +46,27 @@
       <button class="btn btn-primary">Draft Outreach for Selected</button>
     </div>
     {% endif %}
-  </div>
+  </aside>
 
   <!-- CENTER: Map -->
-  <div class="center-panel">
+  <main class="center-panel">
     <div id="map"></div>
     <div class="layer-toggles">
       <h3>Layers</h3>
-      <label class="layer-toggle"><input type="checkbox" checked data-layer="top"> <span class="layer-dot" style="background:#238636"></span> Top-N scored</label>
-      <label class="layer-toggle"><input type="checkbox" checked data-layer="consolidated"> <span class="layer-dot" style="background:#a855f7"></span> Consolidated</label>
-      <label class="layer-toggle"><input type="checkbox" checked data-layer="outreach"> <span class="layer-dot" style="background:#58a6ff"></span> Outreach sent</label>
-      <label class="layer-toggle"><input type="checkbox" checked data-layer="listed"> <span class="layer-dot" style="background:#f0883e"></span> Listed</label>
-      <label class="layer-toggle"><input type="checkbox" checked data-layer="other"> <span class="layer-dot" style="background:#484f58"></span> All others</label>
+      <label class="layer-toggle"><input type="checkbox" checked data-layer="top"> <span class="layer-dot" style="background:#238636" aria-hidden="true"></span> Top-N scored</label>
+      <label class="layer-toggle"><input type="checkbox" checked data-layer="consolidated"> <span class="layer-dot" style="background:#a855f7" aria-hidden="true"></span> Consolidated</label>
+      <label class="layer-toggle"><input type="checkbox" checked data-layer="outreach"> <span class="layer-dot" style="background:#58a6ff" aria-hidden="true"></span> Outreach sent</label>
+      <label class="layer-toggle"><input type="checkbox" checked data-layer="listed"> <span class="layer-dot" style="background:#f0883e" aria-hidden="true"></span> Listed</label>
+      <label class="layer-toggle"><input type="checkbox" checked data-layer="other"> <span class="layer-dot" style="background:#484f58" aria-hidden="true"></span> All others</label>
     </div>
-  </div>
+  </main>
 
   <!-- RIGHT: Detail Panel -->
-  <div class="right-panel" id="detail-panel">
+  <aside class="right-panel" id="detail-panel" aria-label="Parcel details">
     <div class="detail-section" style="color:#8b949e; font-size:12px;">
       Select a parcel to see details.
     </div>
-  </div>
+  </aside>
 </div>
 
 <script>
