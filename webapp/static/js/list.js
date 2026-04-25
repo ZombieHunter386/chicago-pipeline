@@ -4,6 +4,7 @@
   const LIST_PAGE_SIZE = 20;
   let currentOffset = 0;
   let currentTotal = 0;
+  let reqId = 0;
 
   window.addEventListener('filterchange', () => {
     currentOffset = 0;
@@ -16,13 +17,41 @@
   };
 
   async function loadList({replace}) {
+    const myId = ++reqId;
     const qs = window.filterStateToQuery();
     const url = `/api/parcels?${qs}&limit=${LIST_PAGE_SIZE}&offset=${currentOffset}`;
-    const data = await fetch(url).then(r => r.json());
-    currentTotal = data.total;
 
     const list = document.getElementById('parcel-list');
+    const loadMore = document.getElementById('load-more');
+
+    let data;
+    try {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      data = await r.json();
+    } catch (err) {
+      if (myId !== reqId) return; // stale
+      currentTotal = 0;
+      list.textContent = "Couldn't load parcels — refresh to retry.";
+      loadMore.style.display = 'none';
+      return;
+    }
+
+    if (myId !== reqId) return; // stale
+
+    currentTotal = data.total;
+
     if (replace) list.innerHTML = '';
+
+    if (replace && data.parcels.length === 0) {
+      list.textContent = 'No parcels match these filters.';
+      loadMore.style.display = 'none';
+      document.getElementById('count-label').textContent =
+        `0 of ${currentTotal.toLocaleString()}`;
+      document.getElementById('top-bar-meta').textContent =
+        `Score v N/A · ${currentTotal.toLocaleString()} parcels · Top ${LIST_PAGE_SIZE} shown`;
+      return;
+    }
 
     data.parcels.forEach(p => list.appendChild(renderParcelRow(p)));
 
@@ -30,7 +59,7 @@
       `${Math.min(currentOffset + LIST_PAGE_SIZE, currentTotal)} of ${currentTotal.toLocaleString()}`;
     document.getElementById('top-bar-meta').textContent =
       `Score v N/A · ${currentTotal.toLocaleString()} parcels · Top ${LIST_PAGE_SIZE} shown`;
-    document.getElementById('load-more').style.display =
+    loadMore.style.display =
       (currentOffset + LIST_PAGE_SIZE) < currentTotal ? '' : 'none';
   }
 
@@ -38,6 +67,8 @@
     const el = document.createElement('div');
     el.className = 'parcel-item';
     el.dataset.pin = p.pin;
+    el.tabIndex = 0;
+    el.setAttribute('role', 'button');
 
     const details = [
       p.lot_size_sf ? `${Math.round(p.lot_size_sf).toLocaleString()} SF lot` : null,
@@ -65,7 +96,7 @@
       tags.push('<span class="tag listed">Listed</span>');
     }
     if (p.stage && p.stage !== 'scored') {
-      tags.push(`<span class="tag stage">${capitalize(p.stage)}</span>`);
+      tags.push(`<span class="tag stage">${escapeHtml(capitalize(p.stage))}</span>`);
     }
 
     el.innerHTML = `
@@ -74,11 +105,19 @@
       <div class="tags">${tags.join('')}</div>
     `;
 
-    el.onclick = () => {
+    const select = () => {
       document.querySelectorAll('.parcel-item.selected').forEach(e => e.classList.remove('selected'));
       el.classList.add('selected');
       window.dispatchEvent(new CustomEvent('parcelselect', {detail: {pin: p.pin}}));
     };
+
+    el.onclick = select;
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        if (e.key === ' ') e.preventDefault();
+        select();
+      }
+    });
 
     return el;
   }
