@@ -58,26 +58,51 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient) -> int:
     for rows in by_pin.values():
         rows.sort(key=lambda x: int(x["year"]) if x["year"] else 0, reverse=True)
 
+    def _pick(row):
+        # board → certified → mailed precedence; the latest tax year typically
+        # has board_tot still NULL until BOR publishes. Fall back per row.
+        if row["board_tot"] is not None:
+            return row["board_tot"], row["board_land"], row["board_bldg"]
+        if row["certified_tot"] is not None:
+            return row["certified_tot"], row["certified_land"], row["certified_bldg"]
+        if row["mailed_tot"] is not None:
+            return row["mailed_tot"], row["mailed_land"], row["mailed_bldg"]
+        return None, None, None
+
     conn = get_connection(db_path)
     try:
         for pin, rows in by_pin.items():
-            current = rows[0]
-            assessed_total = current["board_tot"]
-            assessed_land = current["board_land"]
-            assessed_bldg = current["board_bldg"]
+            current = next((r for r in rows if _pick(r)[0] is not None), None)
+            if current is None:
+                continue
+            assessed_total, assessed_land, assessed_bldg = _pick(current)
             ratio = (assessed_land / assessed_total) if (assessed_land and assessed_total) else None
 
+            current_year = int(current["year"]) if current["year"] else None
             inc_1yr = None
-            if len(rows) >= 2 and rows[1]["board_tot"] and rows[0]["board_tot"]:
-                inc_1yr = (rows[0]["board_tot"] / rows[1]["board_tot"] - 1) * 100
+            if current_year is not None:
+                prior = next(
+                    (r for r in rows
+                     if r["year"] and int(r["year"]) < current_year
+                     and _pick(r)[0] is not None),
+                    None,
+                )
+                if prior:
+                    prior_tot, _, _ = _pick(prior)
+                    inc_1yr = (assessed_total / prior_tot - 1) * 100
 
             inc_5yr = None
-            current_year = int(current["year"]) if current["year"] else None
             if current_year is not None:
                 target_year = current_year - 5
-                old = next((r for r in rows if r["year"] and int(r["year"]) <= target_year), None)
-                if old and old["board_tot"] and current["board_tot"]:
-                    inc_5yr = (current["board_tot"] / old["board_tot"] - 1) * 100
+                old = next(
+                    (r for r in rows
+                     if r["year"] and int(r["year"]) <= target_year
+                     and _pick(r)[0] is not None),
+                    None,
+                )
+                if old:
+                    old_tot, _, _ = _pick(old)
+                    inc_5yr = (assessed_total / old_tot - 1) * 100
 
             conn.execute("""
                 UPDATE parcels SET

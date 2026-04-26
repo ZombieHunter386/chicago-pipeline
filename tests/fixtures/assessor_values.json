@@ -7,5 +7,18 @@
    "board_bldg": "90000", "board_land": "175000", "board_tot": "265000", "board_hie": "0"},
   {"pin": "14210010010000", "year": "2020", "mailed_bldg": null, "mailed_land": null, "mailed_tot": null,
    "certified_bldg": null, "certified_land": null, "certified_tot": null,
-   "board_bldg": "75000", "board_land": "139000", "board_tot": "214000", "board_hie": "0"}
+   "board_bldg": "75000", "board_land": "139000", "board_tot": "214000", "board_hie": "0"},
+
+  {"pin": "14210010030000", "year": "2026", "mailed_bldg": null, "mailed_land": null, "mailed_tot": null,
+   "certified_bldg": null, "certified_land": null, "certified_tot": null,
+   "board_bldg": null, "board_land": null, "board_tot": null, "board_hie": null},
+  {"pin": "14210010030000", "year": "2025", "mailed_bldg": "60000", "mailed_land": "40000", "mailed_tot": "100000",
+   "certified_bldg": "60000", "certified_land": "40000", "certified_tot": "100000",
+   "board_bldg": "60000", "board_land": "40000", "board_tot": "100000", "board_hie": "0"},
+  {"pin": "14210010030000", "year": "2024", "mailed_bldg": "55000", "mailed_land": "37000", "mailed_tot": "92000",
+   "certified_bldg": "55000", "certified_land": "37000", "certified_tot": "92000",
+   "board_bldg": "55000", "board_land": "37000", "board_tot": "92000", "board_hie": "0"},
+  {"pin": "14210010030000", "year": "2020", "mailed_bldg": "44000", "mailed_land": "30000", "mailed_tot": "74000",
+   "certified_bldg": "44000", "certified_land": "30000", "certified_tot": "74000",
+   "board_bldg": "44000", "board_land": "30000", "board_tot": "74000", "board_hie": "0"}
 ]
