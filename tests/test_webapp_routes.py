@@ -96,6 +96,31 @@ def test_api_parcel_detail_404(pop_client):
     assert resp.status_code == 404
 
 
+def test_api_parcel_detail_rejects_non_numeric_pin(pop_client):
+    # Anything that isn't a 14-digit Cook County PIN should 404 before we
+    # touch the DB. Guards against arbitrary user input being used as a key.
+    resp = pop_client.get("/api/parcels/not-a-pin")
+    assert resp.status_code == 404
+
+
+def test_api_parcel_detail_rejects_short_pin(pop_client):
+    resp = pop_client.get("/api/parcels/12345")
+    assert resp.status_code == 404
+
+
+def test_unhandled_exception_returns_json_500(db_path):
+    # Build a client where TESTING is on (so /_test_explode is registered)
+    # but PROPAGATE_EXCEPTIONS is off (so the registered error handler runs
+    # and returns the JSON envelope rather than re-raising into the test).
+    app = create_app(db_path=db_path, feature_outreach=False)
+    app.config["TESTING"] = True
+    app.config["PROPAGATE_EXCEPTIONS"] = False
+    client = app.test_client()
+    resp = client.get("/_test_explode")
+    assert resp.status_code == 500
+    assert resp.get_json() == {"error": "internal_error"}
+
+
 def test_api_map_data_is_geojson(pop_client):
     resp = pop_client.get("/api/map-data")
     assert resp.status_code == 200

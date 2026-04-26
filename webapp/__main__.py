@@ -11,13 +11,15 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=5000)
     parser.add_argument("--outreach", action="store_true",
                         help="Enable outreach UI (Plan 4 — not implemented)")
+    parser.add_argument("--debug", action="store_true",
+                        help="Enable Flask debug mode (exposes Werkzeug debugger; localhost only)")
     args = parser.parse_args()
 
     if not args.db.exists():
         raise SystemExit(f"Database not found: {args.db}")
 
     app = create_app(db_path=args.db, feature_outreach=args.outreach)
-    app.run(host="127.0.0.1", port=args.port, debug=True)
+    app.run(host="127.0.0.1", port=args.port, debug=args.debug)
 
 
 if __name__ == "__main__":

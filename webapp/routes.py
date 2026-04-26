@@ -4,6 +4,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any
 from flask import Flask, abort, current_app, jsonify, render_template, request
+from werkzeug.exceptions import HTTPException
 
 from webapp.filter_schema import build_filter_schema
 from webapp.parcel_query import (
@@ -58,6 +59,10 @@ def register(app: Flask) -> None:
 
     @app.get("/api/parcels/<pin>")
     def api_parcel_detail(pin: str):
+        # Cook County PINs are 14 digits. Reject anything else outright so
+        # we don't run a SQL query (or echo) arbitrary user-supplied strings.
+        if not pin.isdigit() or len(pin) != 14:
+            abort(404)
         with closing(_conn()) as conn:
             row = conn.execute(
                 "SELECT * FROM parcels WHERE pin = ?", (pin,)
@@ -106,6 +111,22 @@ def register(app: Flask) -> None:
             })
 
         return jsonify({"type": "FeatureCollection", "features": features})
+
+    @app.get("/_test_explode")
+    def _test_explode():
+        # Only available in test mode; production gets a normal 404.
+        if not current_app.config.get("TESTING"):
+            abort(404)
+        raise RuntimeError("boom")
+
+    @app.errorhandler(Exception)
+    def handle_unexpected(e):
+        # Let Flask's default behavior produce HTTP errors (404, 400, etc.)
+        # so they keep their proper status codes and bodies.
+        if isinstance(e, HTTPException):
+            return e
+        app.logger.exception("Unhandled error in %s", request.path)
+        return jsonify({"error": "internal_error"}), 500
 
 
 def _conn() -> sqlite3.Connection:
