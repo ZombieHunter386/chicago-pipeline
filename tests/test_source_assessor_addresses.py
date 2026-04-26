@@ -80,3 +80,38 @@ def test_is_absentee_normalizes_addresses():
     assert is_absentee("100 w diversey", "100 W DIVERSEY") is False  # case-insensitive
     assert is_absentee("100 W DIVERSEY ", " 100 W DIVERSEY") is False  # trim
     assert is_absentee(None, "100 W DIVERSEY") is False
+
+
+def test_is_absentee_handles_pkwy_pky_suffix_variants():
+    from sources.assessor_addresses import is_absentee
+    # Confirmed false-positive case from smoke.db pin 14292270501001
+    assert is_absentee("1122 W DIVERSEY PKY 1E", "1122 W DIVERSEY PKWY1E") is False
+    assert is_absentee("1122 W DIVERSEY PKY 2E", "1122 W DIVERSEY PKWY2E") is False
+
+
+def test_is_absentee_handles_full_suffix_words():
+    from sources.assessor_addresses import is_absentee
+    assert is_absentee("100 W DIVERSEY AVE", "100 W DIVERSEY AVENUE") is False
+    assert is_absentee("100 W STATE ST", "100 W STATE STREET") is False
+    assert is_absentee("100 N CLARK BLVD", "100 N CLARK BOULEVARD") is False
+
+
+def test_is_absentee_handles_direction_variants():
+    from sources.assessor_addresses import is_absentee
+    assert is_absentee("100 NORTH STATE ST", "100 N STATE ST") is False
+    assert is_absentee("100 W DIVERSEY AVE", "100 WEST DIVERSEY AVE") is False
+
+
+def test_is_absentee_strips_unit_markers():
+    from sources.assessor_addresses import is_absentee
+    assert is_absentee("100 W DIVERSEY UNIT 5", "100 W DIVERSEY") is False
+    assert is_absentee("100 W DIVERSEY APT 5", "100 W DIVERSEY UNIT 6") is False
+    assert is_absentee("100 W DIVERSEY STE 200", "100 W DIVERSEY") is False
+    assert is_absentee("100 W DIVERSEY #5", "100 W DIVERSEY") is False
+
+
+def test_is_absentee_still_detects_real_absentee():
+    from sources.assessor_addresses import is_absentee
+    assert is_absentee("1222 W DIVERSEY PKWY", "PO BOX 4421") is True
+    assert is_absentee("100 W DIVERSEY AVE", "200 W DIVERSEY AVE") is True
+    assert is_absentee("100 W DIVERSEY AVE", "100 W ARMITAGE AVE") is True
