@@ -79,6 +79,12 @@ CREATE INDEX IF NOT EXISTS idx_parcels_zone_class ON parcels(zone_class);
 CREATE INDEX IF NOT EXISTS idx_parcels_property_class ON parcels(property_class);
 CREATE INDEX IF NOT EXISTS idx_parcels_score ON parcels(score);
 CREATE INDEX IF NOT EXISTS idx_parcels_stage ON parcels(stage);
+CREATE INDEX IF NOT EXISTS idx_parcels_last_updated_date ON parcels(last_updated_date);
+CREATE INDEX IF NOT EXISTS idx_parcels_hold_duration_years ON parcels(hold_duration_years);
+CREATE INDEX IF NOT EXISTS idx_parcels_is_absentee ON parcels(is_absentee);
+CREATE INDEX IF NOT EXISTS idx_parcels_is_llc ON parcels(is_llc);
+CREATE INDEX IF NOT EXISTS idx_parcels_tax_delinquent ON parcels(tax_delinquent);
+CREATE INDEX IF NOT EXISTS idx_parcels_consolidation_group_id ON parcels(consolidation_group_id);
 
 -- ============================================================
 -- Consolidation groups — adjacent same-owner parcels

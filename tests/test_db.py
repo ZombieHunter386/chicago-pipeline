@@ -124,6 +124,32 @@ def test_upsert_rows_preserves_columns_on_conflict(tmp_path):
     conn.close()
 
 
+def test_init_db_creates_filter_and_sort_indexes(tmp_path):
+    """Indexes for filter/sort columns must exist after init_db so the UI's
+    default queries don't full-scan at full-geography scale."""
+    db = tmp_path / "ix.db"
+    init_db(db)
+    conn = get_connection(db)
+    rows = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='parcels'"
+    ).fetchall()
+    names = {r[0] for r in rows}
+    expected = {
+        "idx_parcels_zone_class",
+        "idx_parcels_property_class",
+        "idx_parcels_score",
+        "idx_parcels_stage",
+        "idx_parcels_last_updated_date",
+        "idx_parcels_hold_duration_years",
+        "idx_parcels_is_absentee",
+        "idx_parcels_is_llc",
+        "idx_parcels_tax_delinquent",
+        "idx_parcels_consolidation_group_id",
+    }
+    missing = expected - names
+    assert not missing, f"Missing indexes: {missing}"
+
+
 def test_upsert_rows_composite_key(tmp_path):
     db = tmp_path / "test.db"
     init_db(db)
