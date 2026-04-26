@@ -2,12 +2,12 @@
 from __future__ import annotations
 from datetime import datetime, date, UTC
 from pathlib import Path
-from math import radians, sin, cos, sqrt, atan2
 from collections import defaultdict
 from pipeline.config import GeographyConfig
 from pipeline.db import upsert_rows, get_connection
 from pipeline.geography import filter_by_polygon, bbox_where_clause
 from pipeline.socrata import SocrataClient
+from pipeline.spatial import match_records_to_parcels
 
 
 DATASET_ID = "22u3-xenr"
@@ -21,15 +21,6 @@ def _f(v):
     if v in (None, ""): return None
     try: return float(v)
     except (TypeError, ValueError): return None
-
-
-def _haversine_ft(lat1, lng1, lat2, lng2):
-    R = 6_371_000
-    a1, a2 = radians(lat1), radians(lat2)
-    da = radians(lat2 - lat1); dl = radians(lng2 - lng1)
-    a = sin(da/2)**2 + cos(a1) * cos(a2) * sin(dl/2)**2
-    c = 2 * atan2(sqrt(a), sqrt(1-a))
-    return R * c * 3.28084
 
 
 def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient) -> int:
@@ -61,34 +52,31 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient) -> int:
 
     conn = get_connection(db_path)
     try:
-        parcels = conn.execute(
+        parcels = [dict(p) for p in conn.execute(
             "SELECT pin, lat, lng FROM parcels WHERE lat IS NOT NULL AND lng IS NOT NULL"
-        ).fetchall()
+        ).fetchall()]
     finally:
         conn.close()
     if not parcels:
         return n
 
+    # Real dataset uses "OPEN", "OPEN - HEARING", "OPEN - REFERRED TO LAW",
+    # etc. Match any status that starts with "OPEN".
+    open_indices = {
+        i for i, r in enumerate(raw_rows)
+        if (r.get("violation_status") or "").upper().startswith("OPEN")
+    }
+    matches = match_records_to_parcels(raw_rows, parcels, MATCH_RADIUS_FT)
     open_count: dict[str, int] = defaultdict(int)
     oldest_open: dict[str, str] = {}
-    for r in raw_rows:
-        # Real dataset uses "OPEN", "OPEN - HEARING", "OPEN - REFERRED TO LAW",
-        # etc. Match any status that starts with "OPEN".
-        if not (r.get("violation_status") or "").upper().startswith("OPEN"):
+    for idx, pin in matches.items():
+        if idx not in open_indices:
             continue
-        if not r["latitude"] or not r["longitude"]:
-            continue
-        best_pin, best_d = None, MATCH_RADIUS_FT
-        for p in parcels:
-            d = _haversine_ft(r["latitude"], r["longitude"], p["lat"], p["lng"])
-            if d <= best_d:
-                best_d, best_pin = d, p["pin"]
-        if best_pin is None:
-            continue
-        open_count[best_pin] += 1
+        r = raw_rows[idx]
+        open_count[pin] += 1
         vd = r["violation_date"]
-        if vd and (best_pin not in oldest_open or vd < oldest_open[best_pin]):
-            oldest_open[best_pin] = vd
+        if vd and (pin not in oldest_open or vd < oldest_open[pin]):
+            oldest_open[pin] = vd
 
     conn = get_connection(db_path)
     try:

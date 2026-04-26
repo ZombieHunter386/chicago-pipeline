@@ -2,12 +2,11 @@
 from __future__ import annotations
 from datetime import datetime, date, UTC
 from pathlib import Path
-from collections import defaultdict
-from math import radians, sin, cos, sqrt, atan2
 from pipeline.config import GeographyConfig
 from pipeline.db import upsert_rows, get_connection
 from pipeline.geography import filter_by_polygon, bbox_where_clause
 from pipeline.socrata import SocrataClient
+from pipeline.spatial import match_records_to_parcels
 
 
 DATASET_ID = "ydr8-5enu"
@@ -21,16 +20,6 @@ def _f(v):
     if v in (None, ""): return None
     try: return float(v)
     except (TypeError, ValueError): return None
-
-
-def _haversine_ft(lat1, lng1, lat2, lng2):
-    R = 6_371_000  # meters
-    a1, a2 = radians(lat1), radians(lat2)
-    da = radians(lat2 - lat1)
-    dl = radians(lng2 - lng1)
-    a = sin(da/2)**2 + cos(a1) * cos(a2) * sin(dl/2)**2
-    c = 2 * atan2(sqrt(a), sqrt(1-a))
-    return R * c * 3.28084
 
 
 def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient) -> int:
@@ -61,29 +50,22 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient) -> int:
     # Match each permit to nearest parcel within MATCH_RADIUS_FT
     conn = get_connection(db_path)
     try:
-        parcels = conn.execute(
+        parcels = [dict(p) for p in conn.execute(
             "SELECT pin, lat, lng FROM parcels WHERE lat IS NOT NULL AND lng IS NOT NULL"
-        ).fetchall()
+        ).fetchall()]
     finally:
         conn.close()
     if not parcels:
         return n
 
-    # Latest permit date per matched parcel
+    matches = match_records_to_parcels(raw_rows, parcels, MATCH_RADIUS_FT)
     latest: dict[str, str] = {}
-    for r in raw_rows:
-        if not r["latitude"] or not r["longitude"] or not r["issue_date"]:
+    for idx, pin in matches.items():
+        r = raw_rows[idx]
+        if not r["issue_date"]:
             continue
-        best_pin, best_d = None, MATCH_RADIUS_FT
-        for p in parcels:
-            d = _haversine_ft(r["latitude"], r["longitude"], p["lat"], p["lng"])
-            if d <= best_d:
-                best_d = d
-                best_pin = p["pin"]
-        if best_pin is None:
-            continue
-        if best_pin not in latest or r["issue_date"] > latest[best_pin]:
-            latest[best_pin] = r["issue_date"]
+        if pin not in latest or r["issue_date"] > latest[pin]:
+            latest[pin] = r["issue_date"]
 
     conn = get_connection(db_path)
     try:
