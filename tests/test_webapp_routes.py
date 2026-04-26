@@ -142,3 +142,57 @@ def test_api_parcels_bad_limit_returns_400(pop_client):
 def test_api_parcels_bad_offset_returns_400(pop_client):
     resp = pop_client.get("/api/parcels?offset=xyz")
     assert resp.status_code == 400
+
+
+def test_e2e_flow_against_smoke_db(pop_client, populated_db_path):
+    """End-to-end smoke flow: schema -> list -> filter -> detail -> map.
+
+    Walks the full UI-driven request sequence and asserts cross-step
+    consistency (detail PIN matches list, map PINs are a subset of the
+    filtered list, totals agree). Per-route shape/error details live in
+    the unit tests above; this test covers the integration.
+    """
+    # 1. Filter schema is well-formed and has the expected number of groups.
+    filters = pop_client.get("/api/filters").get_json()
+    assert len(filters["filter_groups"]) == 6
+
+    # 2. First page of the ranked list. Total comes from the DB so the
+    #    test isn't pinned to a hardcoded fixture row count.
+    expected_total = _scalar(populated_db_path, "SELECT COUNT(*) FROM parcels")
+    listing = pop_client.get("/api/parcels?limit=20").get_json()
+    assert listing["total"] == expected_total
+    assert len(listing["parcels"]) == min(20, expected_total)
+    first_pin = listing["parcels"][0]["pin"]
+
+    # 3. Apply a filter and re-load. Consistency: filtered total matches
+    #    the DB count, and is a strict subset of the unfiltered total.
+    expected_absentee = _scalar(
+        populated_db_path,
+        "SELECT COUNT(*) FROM parcels WHERE is_absentee = 1",
+    )
+    filtered = pop_client.get(
+        "/api/parcels?is_absentee=true&limit=1000"
+    ).get_json()
+    assert filtered["total"] == expected_absentee
+    assert filtered["total"] <= expected_total
+    filtered_pins = {p["pin"] for p in filtered["parcels"]}
+
+    # 4. Detail for the first PIN from the unfiltered list. Confirms the
+    #    list -> detail click path: the PIN round-trips and the response
+    #    includes the server-derived google_maps_url plus a contacts
+    #    array (empty in smoke.db, which has no contacts table rows).
+    detail = pop_client.get(f"/api/parcels/{first_pin}").get_json()
+    assert detail["pin"] == first_pin
+    assert "google_maps_url" in detail
+    assert detail["contacts"] == []
+
+    # 5. Map data under the same filter is valid GeoJSON, non-empty, and
+    #    bounded above by the filtered list total. Every map PIN must
+    #    appear in the filtered list (map is a geo-projection of the
+    #    same query, minus rows without lat/lng).
+    geo = pop_client.get("/api/map-data?is_absentee=true").get_json()
+    assert geo["type"] == "FeatureCollection"
+    assert len(geo["features"]) > 0
+    assert len(geo["features"]) <= filtered["total"]
+    map_pins = {f["properties"]["pin"] for f in geo["features"]}
+    assert map_pins.issubset(filtered_pins)
