@@ -10,5 +10,5 @@ window.escapeHtml = function (s) {
 
 window.capitalize = function (s) {
   if (!s) return '';
-  return s[0].toUpperCase() + s.slice(1).toLowerCase();
+  return s[0].toUpperCase() + s.slice(1);
 };
