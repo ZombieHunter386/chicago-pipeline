@@ -134,6 +134,19 @@
       const fillOpacity = visible ? (cat === 'other' ? 0.5 : 0.8) : 0;
       m.setStyle({ opacity: visible ? 1 : 0, fillOpacity });
     });
+    syncSelectionRingVisibility();
+  }
+
+  function syncSelectionRingVisibility() {
+    if (!selectionRing || selectedPin == null) return;
+    const marker = markersByPin[selectedPin];
+    if (!marker) return;
+    const cat = marker._category || 'other';
+    const visible = !!layerEnabled[cat];
+    selectionRing.setStyle({
+      opacity: visible ? 1 : 0,
+      fillOpacity: 0,
+    });
   }
 
   function highlightSelection(pin) {
@@ -166,6 +179,7 @@
       interactive: false,
     }).addTo(map);
     if (pan) map.panTo(latlng);
+    syncSelectionRingVisibility();
   }
 
   function escapeHtml(s) {
