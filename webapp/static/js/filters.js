@@ -6,28 +6,56 @@ window.FilterState = {
   stage: null,
 };
 
-(async function initFilters() {
-  const schema = await fetch('/api/filters').then(r => r.json());
+// Escape a string for safe use in an HTML attribute or text context.
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
 
-  renderStagePills(schema.stage_pills);
-  renderFilterPanel(schema.filter_groups);
-  wireFilterToggle();
+window.filtersReady = (async function initFilters() {
+  try {
+    const resp = await fetch('/api/filters');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const schema = await resp.json();
 
-  window.dispatchEvent(new CustomEvent('filterchange'));
+    renderStagePills(schema.stage_pills);
+    renderFilterPanel(schema.filter_groups);
+    wireFilterToggle();
+
+    window.dispatchEvent(new CustomEvent('filterchange'));
+  } catch (err) {
+    console.error('Failed to load /api/filters:', err);
+    const panel = document.getElementById('filter-panel');
+    if (panel) {
+      panel.textContent = 'Filters unavailable — refresh to retry.';
+    }
+  }
 })();
 
 function renderStagePills(cfg) {
   const container = document.getElementById('stage-pills');
+  container.innerHTML = '';
   const pills = [{label: 'All', value: null}]
     .concat((cfg.values || []).map(v => ({label: capitalize(v), value: v})));
 
   pills.forEach((p, i) => {
-    const el = document.createElement('div');
-    el.className = 'filter-pill' + (i === 0 ? ' active' : '');
+    const el = document.createElement('button');
+    el.type = 'button';
+    const isActive = i === 0;
+    el.className = 'filter-pill stage-pill' + (isActive ? ' active' : '');
+    el.setAttribute('aria-pressed', isActive ? 'true' : 'false');
     el.textContent = p.label;
     el.onclick = () => {
-      container.querySelectorAll('.filter-pill').forEach(e => e.classList.remove('active'));
+      container.querySelectorAll('.filter-pill').forEach(e => {
+        e.classList.remove('active');
+        e.setAttribute('aria-pressed', 'false');
+      });
       el.classList.add('active');
+      el.setAttribute('aria-pressed', 'true');
       window.FilterState.stage = p.value;
       window.dispatchEvent(new CustomEvent('filterchange'));
     };
@@ -37,10 +65,14 @@ function renderStagePills(cfg) {
 
 function renderFilterPanel(groups) {
   const panel = document.getElementById('filter-panel');
+  panel.innerHTML = '';
   groups.forEach(g => {
     const groupEl = document.createElement('div');
     groupEl.className = 'filter-group';
-    groupEl.innerHTML = `<div class="filter-group-title">${g.group}</div>`;
+    const title = document.createElement('div');
+    title.className = 'filter-group-title';
+    title.textContent = g.group;
+    groupEl.appendChild(title);
     g.filters.forEach(f => groupEl.appendChild(renderFilter(f)));
     panel.appendChild(groupEl);
   });
@@ -49,15 +81,19 @@ function renderFilterPanel(groups) {
 function renderFilter(f) {
   const ctrl = document.createElement('div');
   ctrl.className = 'filter-control';
+  const col = f.column;
+  const colAttr = escapeHtml(col);
+  const labelText = escapeHtml(f.label);
 
   if (f.type === 'checkbox') {
+    const cbId = `filter-${colAttr}-checkbox`;
     ctrl.innerHTML = `
-      <input type="checkbox" class="filter-checkbox" data-col="${f.column}">
-      <label>${f.label}</label>
+      <input type="checkbox" id="${cbId}" class="filter-checkbox" data-col="${colAttr}">
+      <label for="${cbId}">${labelText}</label>
     `;
     ctrl.querySelector('input').onchange = (e) => {
-      if (e.target.checked) window.FilterState.filters[f.column] = true;
-      else delete window.FilterState.filters[f.column];
+      if (e.target.checked) window.FilterState.filters[col] = true;
+      else delete window.FilterState.filters[col];
       updateActiveCount();
       window.dispatchEvent(new CustomEvent('filterchange'));
     };
@@ -65,24 +101,29 @@ function renderFilter(f) {
     ctrl.style.flexDirection = 'column';
     ctrl.style.alignItems = 'flex-start';
     ctrl.style.gap = '4px';
+    const minId = `filter-${colAttr}-min`;
+    const maxId = `filter-${colAttr}-max`;
+    const groupId = `filter-${colAttr}-label`;
     ctrl.innerHTML = `
-      <label style="font-size:10px; color:#8b949e;">${f.label}</label>
+      <label id="${groupId}" style="font-size:10px; color:#8b949e;">${labelText}</label>
       <div class="filter-range">
-        <input type="number" class="filter-input" placeholder="Min" data-col="${f.column}" data-bound="min">
+        <label for="${minId}" class="visually-hidden" style="position:absolute;left:-9999px;">${labelText} min</label>
+        <input type="number" id="${minId}" class="filter-input" placeholder="Min" data-col="${colAttr}" data-bound="min">
         <span style="color:#484f58;">—</span>
-        <input type="number" class="filter-input" placeholder="Max" data-col="${f.column}" data-bound="max">
+        <label for="${maxId}" class="visually-hidden" style="position:absolute;left:-9999px;">${labelText} max</label>
+        <input type="number" id="${maxId}" class="filter-input" placeholder="Max" data-col="${colAttr}" data-bound="max">
       </div>
     `;
     ctrl.querySelectorAll('input').forEach(i => {
       i.onchange = (e) => {
-        const col = e.target.dataset.col;
+        const c = e.target.dataset.col;
         const bound = e.target.dataset.bound;
         const val = e.target.value === '' ? null : parseFloat(e.target.value);
-        const cur = window.FilterState.filters[col] || {};
+        const cur = window.FilterState.filters[c] || {};
         if (val === null) delete cur[bound];
         else cur[bound] = val;
-        if (Object.keys(cur).length === 0) delete window.FilterState.filters[col];
-        else window.FilterState.filters[col] = cur;
+        if (Object.keys(cur).length === 0) delete window.FilterState.filters[c];
+        else window.FilterState.filters[c] = cur;
         updateActiveCount();
         window.dispatchEvent(new CustomEvent('filterchange'));
       };
@@ -91,33 +132,54 @@ function renderFilter(f) {
     ctrl.style.flexDirection = 'column';
     ctrl.style.alignItems = 'flex-start';
     ctrl.style.gap = '4px';
-    const opts = (f.options || []).map(o => `<option value="${o}">${o}</option>`).join('');
-    ctrl.innerHTML = `
-      <label style="font-size:10px; color:#8b949e;">${f.label}</label>
-      <select class="filter-select" data-col="${f.column}">
-        <option value="">Any</option>
-        ${opts}
-      </select>
-    `;
-    ctrl.querySelector('select').onchange = (e) => {
-      const col = e.target.dataset.col;
-      if (e.target.value === '') delete window.FilterState.filters[col];
-      else window.FilterState.filters[col] = e.target.value;
+    const ddId = `filter-${colAttr}-dropdown`;
+
+    const label = document.createElement('label');
+    label.setAttribute('for', ddId);
+    label.style.fontSize = '10px';
+    label.style.color = '#8b949e';
+    label.textContent = f.label;
+    ctrl.appendChild(label);
+
+    const select = document.createElement('select');
+    select.id = ddId;
+    select.className = 'filter-select';
+    select.dataset.col = col;
+
+    const anyOpt = document.createElement('option');
+    anyOpt.value = '';
+    anyOpt.textContent = 'Any';
+    select.appendChild(anyOpt);
+
+    (f.options || []).forEach(o => {
+      const opt = document.createElement('option');
+      opt.value = o;
+      opt.textContent = o;
+      select.appendChild(opt);
+    });
+
+    select.onchange = (e) => {
+      const c = e.target.dataset.col;
+      if (e.target.value === '') delete window.FilterState.filters[c];
+      else window.FilterState.filters[c] = e.target.value;
       updateActiveCount();
       window.dispatchEvent(new CustomEvent('filterchange'));
     };
+
+    ctrl.appendChild(select);
   } else if (f.type === 'text_search') {
     ctrl.style.flexDirection = 'column';
     ctrl.style.alignItems = 'flex-start';
     ctrl.style.gap = '4px';
+    const txtId = `filter-${colAttr}-text`;
     ctrl.innerHTML = `
-      <label style="font-size:10px; color:#8b949e;">${f.label}</label>
-      <input type="text" class="filter-input" style="width:100%;" placeholder="Search…" data-col="${f.column}">
+      <label for="${txtId}" style="font-size:10px; color:#8b949e;">${labelText}</label>
+      <input type="text" id="${txtId}" class="filter-input" style="width:100%;" placeholder="Search…" data-col="${colAttr}">
     `;
     ctrl.querySelector('input').onchange = (e) => {
-      const col = e.target.dataset.col;
-      if (e.target.value === '') delete window.FilterState.filters[col];
-      else window.FilterState.filters[col] = e.target.value;
+      const c = e.target.dataset.col;
+      if (e.target.value === '') delete window.FilterState.filters[c];
+      else window.FilterState.filters[c] = e.target.value;
       updateActiveCount();
       window.dispatchEvent(new CustomEvent('filterchange'));
     };
@@ -134,10 +196,12 @@ function updateActiveCount() {
 function wireFilterToggle() {
   const btn = document.getElementById('filter-toggle');
   const panel = document.getElementById('filter-panel');
+  btn.setAttribute('aria-expanded', 'false');
   btn.onclick = () => {
     panel.classList.toggle('open');
     const isOpen = panel.classList.contains('open');
-    btn.querySelector('.arrow').textContent = isOpen ? '▾' : '▸';
+    const arrow = btn.querySelector('.arrow');
+    if (arrow) arrow.textContent = isOpen ? '▾' : '▸';
     btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
   };
   document.getElementById('clear-filters').onclick = () => {
