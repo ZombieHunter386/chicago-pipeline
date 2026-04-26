@@ -34,7 +34,7 @@ def test_addresses_populates_owner_and_derives_absentee_llc(db_path, geo, cook_c
         json=[], status=200,
     )
     n = assessor_addresses.fetch(geo, db_path, cook_client)
-    assert n == 2
+    assert n == 3
 
     conn = get_connection(db_path)
     rows = conn.execute("""
@@ -115,3 +115,33 @@ def test_is_absentee_still_detects_real_absentee():
     assert is_absentee("1222 W DIVERSEY PKWY", "PO BOX 4421") is True
     assert is_absentee("100 W DIVERSEY AVE", "200 W DIVERSEY AVE") is True
     assert is_absentee("100 W DIVERSEY AVE", "100 W ARMITAGE AVE") is True
+
+
+@responses.activate
+def test_is_llc_checks_owner_field_when_mail_is_a_person(db_path, geo, cook_client):
+    """LLC ownership often shows on the owner_address_name line while
+    mail_address_name is a person (e.g. property manager). Must flag is_llc=1."""
+    parcels_fixture = json.loads((FIXTURES / "assessor_parcels.json").read_text())
+    responses.add(responses.GET,
+        f"https://datacatalog.cookcountyil.gov/resource/{assessor_parcels.DATASET_ID}.json",
+        json=parcels_fixture, status=200)
+    responses.add(responses.GET,
+        f"https://datacatalog.cookcountyil.gov/resource/{assessor_parcels.DATASET_ID}.json",
+        json=[], status=200)
+    assessor_parcels.fetch(geo, db_path, cook_client)
+
+    addr_fixture = json.loads((FIXTURES / "assessor_addresses.json").read_text())
+    responses.add(responses.GET,
+        f"https://datacatalog.cookcountyil.gov/resource/{assessor_addresses.DATASET_ID}.json",
+        json=addr_fixture, status=200)
+    responses.add(responses.GET,
+        f"https://datacatalog.cookcountyil.gov/resource/{assessor_addresses.DATASET_ID}.json",
+        json=[], status=200)
+    assessor_addresses.fetch(geo, db_path, cook_client)
+
+    conn = get_connection(db_path)
+    p = conn.execute(
+        "SELECT is_llc, owner_name FROM parcels WHERE pin='14210010040000'"
+    ).fetchone()
+    assert p["is_llc"] == 1
+    assert "LLC" in (p["owner_name"] or "")

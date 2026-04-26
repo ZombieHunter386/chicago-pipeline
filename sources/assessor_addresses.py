@@ -140,7 +140,7 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient) -> int:
         for r in raw_rows:
             owner = r["owner_address_name"] or r["mail_address_name"]
             absentee = 1 if is_absentee(r["prop_address_full"], r["mail_address_full"]) else 0
-            llc = 1 if is_llc(r["mail_address_name"]) else 0
+            llc = 1 if (is_llc(r["owner_address_name"]) or is_llc(r["mail_address_name"])) else 0
             conn.execute("""
                 UPDATE parcels SET
                     address = :address,

@@ -21,7 +21,7 @@ def test_fetch_loads_parcels_in_geography_only(db_path, geo, cook_client):
     )
     n = assessor_parcels.fetch(geo, db_path, cook_client)
     # The 99999... row is far outside the polygon and must be dropped
-    assert n == 3
+    assert n == 4
 
     conn = get_connection(db_path)
     rows = conn.execute("SELECT pin FROM raw_assessor_parcels ORDER BY pin").fetchall()
@@ -31,6 +31,6 @@ def test_fetch_loads_parcels_in_geography_only(db_path, geo, cook_client):
 
     # Parcels stub row should also exist for downstream join
     parcel_rows = conn.execute("SELECT pin, lat, lng, ward_num FROM parcels ORDER BY pin").fetchall()
-    assert len(parcel_rows) == 3
+    assert len(parcel_rows) == 4
     assert parcel_rows[0]["pin"] == "14210010010000"
     assert parcel_rows[0]["lat"] == 41.94

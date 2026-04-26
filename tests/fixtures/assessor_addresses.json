@@ -12,5 +12,12 @@
    "mail_address_name": "JOHN SMITH", "mail_address_full": "200 N HALSTED ST",
    "mail_address_city_name": "CHICAGO", "mail_address_state": "IL",
    "mail_address_zipcode_1": "60614",
-   "owner_address_name": "JOHN SMITH", "owner_address_full": "200 N HALSTED ST"}
+   "owner_address_name": "JOHN SMITH", "owner_address_full": "200 N HALSTED ST"},
+  {"pin": "14210010040000",
+   "prop_address_full": "2846 N RACINE AVE", "prop_address_city_name": "CHICAGO",
+   "prop_address_state": "IL", "prop_address_zipcode_1": "60614",
+   "mail_address_name": "JENNIFER CULL", "mail_address_full": "500 N STATE ST",
+   "mail_address_city_name": "CHICAGO", "mail_address_state": "IL",
+   "mail_address_zipcode_1": "60610",
+   "owner_address_name": "2846 NORTH RACINE LLC", "owner_address_full": "2846 N RACINE AVE"}
 ]
