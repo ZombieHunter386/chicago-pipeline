@@ -78,6 +78,49 @@ def test_values_falls_back_when_latest_year_is_empty(db_path, geo, cook_client):
 
 
 @responses.activate
+def test_values_handles_zero_prior_total_without_dividing_by_zero(db_path, geo, cook_client):
+    """Vacant lots and certain class-100 rows can carry 0 in board_tot/certified_tot.
+    The trend math must skip those years rather than divide by zero."""
+    parcels_fixture = json.loads((FIXTURES / "assessor_parcels.json").read_text())
+    responses.add(responses.GET,
+        f"https://datacatalog.cookcountyil.gov/resource/{assessor_parcels.DATASET_ID}.json",
+        json=parcels_fixture, status=200)
+    responses.add(responses.GET,
+        f"https://datacatalog.cookcountyil.gov/resource/{assessor_parcels.DATASET_ID}.json",
+        json=[], status=200)
+    assessor_parcels.fetch(geo, db_path, cook_client)
+
+    # Inline fixture: latest year has data, prior year has 0
+    vals = [
+        {"pin": "14210010010000", "year": "2025",
+         "board_tot": "300000", "board_land": "100000", "board_bldg": "200000",
+         "certified_tot": "300000", "certified_land": "100000", "certified_bldg": "200000",
+         "mailed_tot": "300000", "mailed_land": "100000", "mailed_bldg": "200000",
+         "board_hie": "0"},
+        {"pin": "14210010010000", "year": "2024",
+         "board_tot": "0", "board_land": "0", "board_bldg": "0",
+         "certified_tot": "0", "certified_land": "0", "certified_bldg": "0",
+         "mailed_tot": "0", "mailed_land": "0", "mailed_bldg": "0", "board_hie": "0"},
+    ]
+    responses.add(responses.GET,
+        f"https://datacatalog.cookcountyil.gov/resource/{assessor_values.DATASET_ID}.json",
+        json=vals, status=200)
+    responses.add(responses.GET,
+        f"https://datacatalog.cookcountyil.gov/resource/{assessor_values.DATASET_ID}.json",
+        json=[], status=200)
+    # Must not raise
+    assessor_values.fetch(geo, db_path, cook_client)
+
+    conn = get_connection(db_path)
+    p = conn.execute(
+        "SELECT assessed_total, tax_increase_pct_1yr FROM parcels WHERE pin='14210010010000'"
+    ).fetchone()
+    assert p["assessed_total"] == 300000.0
+    # 2024 is 0 → no usable prior-year for trend
+    assert p["tax_increase_pct_1yr"] is None
+
+
+@responses.activate
 def test_values_writes_estimated_annual_tax(db_path, geo, cook_client):
     """End-to-end: estimated_annual_tax populated using config/tax_constants.yaml.
     With no exemption applied (homeowner exemption deferred until per-parcel

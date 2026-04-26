@@ -83,11 +83,11 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient) -> int:
 
             current_year = int(current["year"]) if current["year"] else None
             inc_1yr = None
-            if current_year is not None:
+            if current_year is not None and assessed_total:
                 prior = next(
                     (r for r in rows
                      if r["year"] and int(r["year"]) < current_year
-                     and _pick(r)[0] is not None),
+                     and _pick(r)[0]),
                     None,
                 )
                 if prior:
@@ -95,12 +95,12 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient) -> int:
                     inc_1yr = (assessed_total / prior_tot - 1) * 100
 
             inc_5yr = None
-            if current_year is not None:
+            if current_year is not None and assessed_total:
                 target_year = current_year - 5
                 old = next(
                     (r for r in rows
                      if r["year"] and int(r["year"]) <= target_year
-                     and _pick(r)[0] is not None),
+                     and _pick(r)[0]),
                     None,
                 )
                 if old:
