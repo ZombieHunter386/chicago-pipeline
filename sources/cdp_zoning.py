@@ -12,7 +12,10 @@ from pipeline.socrata import SocrataClient
 from pipeline.zoning_lookup import load_zoning_lookup
 
 
-DATASET_ID = "7cve-jgbp"
+# Chicago Data Portal: Boundaries - Zoning Districts (current).
+# The "Map" variant (7cve-jgbp) doesn't expose data via the SODA API and
+# returned 0 rows silently in the previous smoke run.
+DATASET_ID = "dj47-wfun"
 TABLE = "raw_cdp_zoning"
 SOURCE_NAME = "cdp_zoning"
 
@@ -49,7 +52,10 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient,
     n = upsert_rows(db_path, TABLE, raw_rows, key_columns=["objectid"])
 
     if not polys:
-        return n
+        raise RuntimeError(
+            f"cdp_zoning: dataset {DATASET_ID} returned 0 polygons. "
+            f"Verify the dataset id is current and the Socrata endpoint is reachable."
+        )
 
     zones_gdf = gpd.GeoDataFrame(polys, crs="EPSG:4326")
 

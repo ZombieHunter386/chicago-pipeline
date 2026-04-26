@@ -66,3 +66,25 @@ def test_cdp_zoning_assigns_zone_class_and_far_gap(db_path, geo, cook_client, cd
     assert out["max_far"] is None
     assert out["far_gap"] is None
     assert out["allows_multifamily_by_right"] is None
+
+
+@responses.activate
+def test_cdp_zoning_raises_when_dataset_returns_empty(db_path, geo, cook_client, cdp_client):
+    """An empty zoning response is never legitimate for a Chicago geography.
+    Surface the failure rather than silently NULLing every zoning column."""
+    pf = json.loads((FIXTURES / "assessor_parcels.json").read_text())
+    responses.add(responses.GET,
+        f"https://datacatalog.cookcountyil.gov/resource/{assessor_parcels.DATASET_ID}.json",
+        json=pf, status=200)
+    responses.add(responses.GET,
+        f"https://datacatalog.cookcountyil.gov/resource/{assessor_parcels.DATASET_ID}.json",
+        json=[], status=200)
+    assessor_parcels.fetch(geo, db_path, cook_client)
+
+    responses.add(responses.GET,
+        f"https://data.cityofchicago.org/resource/{cdp_zoning.DATASET_ID}.json",
+        json=[], status=200)
+
+    import pytest
+    with pytest.raises(RuntimeError, match="returned 0 polygons"):
+        cdp_zoning.fetch(geo, db_path, cdp_client)
