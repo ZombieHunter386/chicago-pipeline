@@ -53,8 +53,10 @@ class SocrataClient:
                 params["$where"] = where
             if select:
                 params["$select"] = select
-            if order:
-                params["$order"] = order
+            # Offset pagination across multi-page datasets requires a stable
+            # $order; without it Socrata may return rows in arbitrary order.
+            # :id is the universal SODA record id and exists on every dataset.
+            params["$order"] = order if order else ":id"
 
             page = self._get_with_retry(url, params)
             if not page:

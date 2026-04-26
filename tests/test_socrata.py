@@ -74,3 +74,26 @@ def test_fetch_raises_after_max_retries():
                            retry_backoff=0.0, max_retries=3)
     with pytest.raises(SocrataError):
         list(client.fetch("xyz-456", limit=50000))
+
+
+@responses.activate
+def test_fetch_defaults_to_id_order_when_none_passed():
+    """Without an explicit $order, offset pagination is unsafe across multiple
+    pages because Socrata may return rows in arbitrary order. Default to :id."""
+    url = "https://data.cityofchicago.org/resource/abcd-1234.json"
+    responses.add(responses.GET, url, json=[], status=200)
+    client = SocrataClient(domain="data.cityofchicago.org", retry_backoff=0.0)
+    list(client.fetch("abcd-1234"))
+    qs = responses.calls[0].request.url
+    assert "%24order=%3Aid" in qs or "$order=:id" in qs
+
+
+@responses.activate
+def test_fetch_preserves_caller_supplied_order():
+    """Explicit $order from the caller must not be clobbered by the default."""
+    url = "https://data.cityofchicago.org/resource/abcd-1234.json"
+    responses.add(responses.GET, url, json=[], status=200)
+    client = SocrataClient(domain="data.cityofchicago.org", retry_backoff=0.0)
+    list(client.fetch("abcd-1234", order="year DESC"))
+    qs = responses.calls[0].request.url
+    assert "%24order=year+DESC" in qs or "$order=year DESC" in qs
