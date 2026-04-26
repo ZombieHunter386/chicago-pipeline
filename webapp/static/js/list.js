@@ -121,12 +121,4 @@
 
     return el;
   }
-
-  function escapeHtml(s) {
-    return (s || '').replace(/[&<>"']/g, c => ({
-      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-    }[c]));
-  }
-
-  function capitalize(s) { return s[0].toUpperCase() + s.slice(1); }
 })();

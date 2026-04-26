@@ -181,10 +181,4 @@
     if (pan) map.panTo(latlng);
     syncSelectionRingVisibility();
   }
-
-  function escapeHtml(s) {
-    return (s == null ? '' : String(s)).replace(/[&<>"']/g, c => ({
-      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-    }[c]));
-  }
 })();

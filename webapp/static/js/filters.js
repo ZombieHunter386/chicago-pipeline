@@ -6,16 +6,6 @@ window.FilterState = {
   stage: null,
 };
 
-// Escape a string for safe use in an HTML attribute or text context.
-function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
-
 window.filtersReady = (async function initFilters() {
   try {
     const resp = await fetch('/api/filters');
@@ -214,8 +204,6 @@ function wireFilterToggle() {
     window.dispatchEvent(new CustomEvent('filterchange'));
   };
 }
-
-function capitalize(s) { return s[0].toUpperCase() + s.slice(1); }
 
 // Helper used by list.js and map.js to build query strings
 window.filterStateToQuery = function() {
