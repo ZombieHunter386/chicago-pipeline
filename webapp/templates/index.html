@@ -21,7 +21,7 @@
 </div>
 {% endif %}
 
-<div class="main"{% if not feature_outreach %} style="height: calc(100vh - 56px);"{% endif %}>
+<div class="{% if feature_outreach %}main has-banner{% else %}main{% endif %}">
 
   <!-- LEFT: Ranked List -->
   <aside class="left-panel" aria-label="Ranked parcels list">

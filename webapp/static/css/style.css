@@ -16,7 +16,8 @@
   .due-badge.overdue .count { color: #f85149; }
 
   /* Main layout */
-  .main { display: flex; height: calc(100vh - 56px - 38px); overflow: hidden; }
+  .main { display: flex; height: calc(100vh - 56px); overflow: hidden; }
+  .main.has-banner { height: calc(100vh - 56px - 38px); }
 
   /* Left panel — ranked list */
   .left-panel { width: 320px; min-width: 320px; background: #161b22; border-right: 1px solid #30363d; display: flex; flex-direction: column; }

@@ -11,6 +11,14 @@ def _run(db_path, sql, params):
         conn.close()
 
 
+def _scalar(db_path, sql, *params):
+    conn = sqlite3.connect(db_path)
+    try:
+        return conn.execute(sql, params).fetchone()[0]
+    finally:
+        conn.close()
+
+
 def test_empty_filters_returns_all_with_default_sort(populated_db_path):
     sql, params = build_parcel_query(filters={}, stage=None, limit=20, offset=0)
     rows = _run(populated_db_path, sql, params)
@@ -25,7 +33,8 @@ def test_checkbox_filter_is_absentee(populated_db_path):
         filters={"is_absentee": True}, stage=None, limit=1000, offset=0
     )
     rows = _run(populated_db_path, sql, params)
-    assert len(rows) == 568  # known count from smoke.db
+    expected = _scalar(populated_db_path, "SELECT COUNT(*) FROM parcels WHERE is_absentee = 1")
+    assert len(rows) == expected
     assert all(r["is_absentee"] == 1 for r in rows)
 
 
@@ -92,4 +101,5 @@ def test_count_query_matches_result_query(populated_db_path):
     count_sql, count_params = build_count_query(filters=filters, stage=None)
     n_rows = len(_run(populated_db_path, list_sql, list_params))
     n_count = _run(populated_db_path, count_sql, count_params)[0]["n"]
-    assert n_rows == n_count == 568
+    expected = _scalar(populated_db_path, "SELECT COUNT(*) FROM parcels WHERE is_absentee = 1")
+    assert n_rows == n_count == expected
