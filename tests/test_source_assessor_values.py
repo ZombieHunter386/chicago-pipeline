@@ -75,3 +75,37 @@ def test_values_falls_back_when_latest_year_is_empty(db_path, geo, cook_client):
     assert round(p["tax_increase_pct_1yr"], 1) == 8.7
     # 5-yr trend: 2025 (100000) vs 2020 (74000) = ~35.1%
     assert round(p["tax_increase_pct_5yr"], 1) == 35.1
+
+
+@responses.activate
+def test_values_writes_estimated_annual_tax(db_path, geo, cook_client):
+    """End-to-end: estimated_annual_tax populated using config/tax_constants.yaml.
+    With no exemption applied (homeowner exemption deferred until per-parcel
+    exemptions data is ingested), the estimate is an upper bound on actual tax."""
+    parcels_fixture = json.loads((FIXTURES / "assessor_parcels.json").read_text())
+    responses.add(responses.GET,
+        f"https://datacatalog.cookcountyil.gov/resource/{assessor_parcels.DATASET_ID}.json",
+        json=parcels_fixture, status=200)
+    responses.add(responses.GET,
+        f"https://datacatalog.cookcountyil.gov/resource/{assessor_parcels.DATASET_ID}.json",
+        json=[], status=200)
+    assessor_parcels.fetch(geo, db_path, cook_client)
+
+    vals_fixture = json.loads((FIXTURES / "assessor_values.json").read_text())
+    responses.add(responses.GET,
+        f"https://datacatalog.cookcountyil.gov/resource/{assessor_values.DATASET_ID}.json",
+        json=vals_fixture, status=200)
+    responses.add(responses.GET,
+        f"https://datacatalog.cookcountyil.gov/resource/{assessor_values.DATASET_ID}.json",
+        json=[], status=200)
+    assessor_values.fetch(geo, db_path, cook_client)
+
+    conn = get_connection(db_path)
+    p = conn.execute("""
+        SELECT assessed_total, estimated_annual_tax FROM parcels
+        WHERE pin='14210010010000'
+    """).fetchone()
+    # AV = 287430; EAV = 287430 × 3.0027 = 863066.061
+    # tax = 863066.061 × 6.717% = 57,972.15
+    assert p["assessed_total"] == 287430.0
+    assert round(p["estimated_annual_tax"], 0) == 57972

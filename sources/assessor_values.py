@@ -3,9 +3,10 @@ from __future__ import annotations
 from datetime import datetime, UTC
 from pathlib import Path
 from collections import defaultdict
-from pipeline.config import GeographyConfig
+from pipeline.config import GeographyConfig, CONFIG_DIR
 from pipeline.db import upsert_rows, get_connection
 from pipeline.socrata import SocrataClient
+from pipeline.tax import estimate_annual_tax, load_tax_constants
 
 
 DATASET_ID = "uzyt-m557"
@@ -69,6 +70,8 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient) -> int:
             return row["mailed_tot"], row["mailed_land"], row["mailed_bldg"]
         return None, None, None
 
+    tax_constants = load_tax_constants(CONFIG_DIR / "tax_constants.yaml")
+
     conn = get_connection(db_path)
     try:
         for pin, rows in by_pin.items():
@@ -104,18 +107,32 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient) -> int:
                     old_tot, _, _ = _pick(old)
                     inc_5yr = (assessed_total / old_tot - 1) * 100
 
+            # Estimated annual tax. Homeowner exemption is left off until we
+            # ingest a per-parcel exemptions feed; raw_assessor_exempt covers
+            # only fully-tax-exempt parcels (churches, schools), not the
+            # standard $10K-EAV homeowner reduction.
+            est_tax = estimate_annual_tax(
+                assessed_total=assessed_total,
+                equalizer=tax_constants["equalizer"],
+                composite_rate_pct=tax_constants["composite_rate_pct"],
+                homeowner_exemption_eav_reduction=tax_constants["homeowner_exemption_eav_reduction"],
+                has_homeowner_exemption=False,
+            )
+
             conn.execute("""
                 UPDATE parcels SET
                     assessed_land = :al,
                     assessed_building = :ab,
                     assessed_total = :at,
                     land_building_ratio = :ratio,
+                    estimated_annual_tax = :etax,
                     tax_increase_pct_1yr = :i1,
                     tax_increase_pct_5yr = :i5,
                     last_updated_date = :now
                 WHERE pin = :pin
             """, {"al": assessed_land, "ab": assessed_bldg, "at": assessed_total,
-                  "ratio": ratio, "i1": inc_1yr, "i5": inc_5yr,
+                  "ratio": ratio, "etax": est_tax,
+                  "i1": inc_1yr, "i5": inc_5yr,
                   "now": fetched_at, "pin": pin})
         conn.commit()
     finally:

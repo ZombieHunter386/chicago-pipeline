@@ -1,0 +1,14 @@
+# Cook County / Chicago property tax estimation constants.
+# Update these annually as IDOR publishes the equalizer and the Cook County
+# Clerk publishes composite tax rates.
+#
+# Sources:
+#   - State equalization factor: Illinois Department of Revenue
+#     https://tax.illinois.gov/localgovernments/property/equalization.html
+#   - Composite tax rate: Cook County Clerk's Office, "Tax Rate Reports"
+#     (Chicago city-wide weighted average for residential property)
+
+tax_year: 2024
+equalizer: 3.0027
+composite_rate_pct: 6.717
+homeowner_exemption_eav_reduction: 10000
