@@ -9,6 +9,15 @@ Off-market deal sourcing pipeline for Chicago multifamily properties. Fetches pa
 3. Register at https://dev.socrata.com for a free app token
 4. `cp .env.example .env` and fill in `SOCRATA_APP_TOKEN`
 5. Edit `config/geography.yaml` if you want a different target area
+6. Provide the Cook County Clerk delinquent-tax CSV — see below
+
+### Cook County Clerk delinquent tax CSV
+
+This source is not on Socrata. Download the current delinquent-tax parcel list
+from the Cook County Clerk's office and save it to `data/delinquent.csv`. The
+pipeline raises `FileNotFoundError` until this file is in place. Required
+columns: `pin`, `tax_year`, `amount_owed`. PINs may be in dashed
+(`14-21-001-001-0000`) or undashed form.
 
 ## Usage
 

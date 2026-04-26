@@ -77,6 +77,16 @@ def test_delinquent_csv_handles_currency_formatting(db_path, geo, cook_client, t
     assert abs(r["total_owed"] - (4820.10 + 5498.30)) < 0.01
 
 
+def test_clerk_delinquent_raises_when_csv_missing(db_path, tmp_path):
+    """Missing CSV must raise — silently skipping leaves every parcel NULL on
+    tax_delinquent and produces a fetch run that looks successful but has no
+    delinquency data at all."""
+    import pytest
+    missing = tmp_path / "does_not_exist.csv"
+    with pytest.raises(FileNotFoundError, match="delinquent CSV"):
+        clerk_delinquent.fetch_from_csv(missing, db_path)
+
+
 @responses.activate
 def test_delinquent_rerun_clears_stale_flag(db_path, geo, cook_client, tmp_path):
     """A PIN flagged in a prior run that pays off its taxes must be cleared

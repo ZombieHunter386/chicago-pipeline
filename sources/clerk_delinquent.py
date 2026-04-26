@@ -30,8 +30,11 @@ def _parse_amount(raw) -> float | None:
 def fetch_from_csv(csv_path: Path, db_path: Path) -> int:
     fetched_at = datetime.now(UTC).isoformat(timespec="seconds")
     if not csv_path.exists():
-        print(f"Delinquent CSV not found at {csv_path} — skipping")
-        return 0
+        raise FileNotFoundError(
+            f"clerk_delinquent: delinquent CSV not found at {csv_path}. "
+            f"Download the latest tax-delinquent parcel list from the Cook County "
+            f"Clerk and save it to {csv_path} before running the pipeline."
+        )
 
     conn = get_connection(db_path)
     try:
