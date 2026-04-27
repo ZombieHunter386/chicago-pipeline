@@ -42,7 +42,10 @@ def test_api_filters_returns_schema(pop_client):
 
 
 def test_api_parcels_default_pagination(pop_client, populated_db_path):
-    expected_total = _scalar(populated_db_path, "SELECT COUNT(*) FROM parcels")
+    # Default response excludes condo units (is_condo_unit=1).
+    expected_total = _scalar(
+        populated_db_path, "SELECT COUNT(*) FROM parcels WHERE is_condo_unit = 0"
+    )
     resp = pop_client.get("/api/parcels")
     assert resp.status_code == 200
     data = resp.get_json()
@@ -55,7 +58,7 @@ def test_api_parcels_default_pagination(pop_client, populated_db_path):
 def test_api_parcels_applies_filter(pop_client, populated_db_path):
     expected_total = _scalar(
         populated_db_path,
-        "SELECT COUNT(*) FROM parcels WHERE is_absentee = 1",
+        "SELECT COUNT(*) FROM parcels WHERE is_absentee = 1 AND is_condo_unit = 0",
     )
     resp = pop_client.get("/api/parcels?is_absentee=true&limit=1000")
     data = resp.get_json()
@@ -149,6 +152,7 @@ def test_api_map_data_marks_consolidated(pop_client, populated_db_path):
         WHERE consolidation_group_id IS NOT NULL
           AND lat IS NOT NULL
           AND lng IS NOT NULL
+          AND is_condo_unit = 0
           AND (listing_status IS NULL OR listing_status != 'listed')
           AND (stage IS NULL OR stage != 'outreach')
         """,
@@ -179,11 +183,14 @@ def test_e2e_flow_against_smoke_db(pop_client, populated_db_path):
     """
     # 1. Filter schema is well-formed and has the expected number of groups.
     filters = pop_client.get("/api/filters").get_json()
-    assert len(filters["filter_groups"]) == 6
+    assert len(filters["filter_groups"]) == 8
 
     # 2. First page of the ranked list. Total comes from the DB so the
-    #    test isn't pinned to a hardcoded fixture row count.
-    expected_total = _scalar(populated_db_path, "SELECT COUNT(*) FROM parcels")
+    #    test isn't pinned to a hardcoded fixture row count. Default
+    #    response excludes condo units (is_condo_unit=1).
+    expected_total = _scalar(
+        populated_db_path, "SELECT COUNT(*) FROM parcels WHERE is_condo_unit = 0"
+    )
     listing = pop_client.get("/api/parcels?limit=20").get_json()
     assert listing["total"] == expected_total
     assert len(listing["parcels"]) == min(20, expected_total)
@@ -193,7 +200,7 @@ def test_e2e_flow_against_smoke_db(pop_client, populated_db_path):
     #    the DB count, and is a strict subset of the unfiltered total.
     expected_absentee = _scalar(
         populated_db_path,
-        "SELECT COUNT(*) FROM parcels WHERE is_absentee = 1",
+        "SELECT COUNT(*) FROM parcels WHERE is_absentee = 1 AND is_condo_unit = 0",
     )
     filtered = pop_client.get(
         "/api/parcels?is_absentee=true&limit=1000"
@@ -221,3 +228,23 @@ def test_e2e_flow_against_smoke_db(pop_client, populated_db_path):
     assert len(geo["features"]) <= filtered["total"]
     map_pins = {f["properties"]["pin"] for f in geo["features"]}
     assert map_pins.issubset(filtered_pins)
+
+
+def test_api_parcels_excludes_condo_units_by_default(pop_client, populated_db_path):
+    """End-to-end via Flask: condo units are not in the default response."""
+    conn = sqlite3.connect(populated_db_path)
+    hidden_pin = conn.execute(
+        "SELECT pin FROM parcels WHERE is_condo_unit = 1 LIMIT 1"
+    ).fetchone()
+    conn.close()
+    if hidden_pin is None:
+        pytest.skip("smoke.db has no is_condo_unit=1 rows yet")
+    hidden_pin = hidden_pin[0]
+
+    r = pop_client.get("/api/parcels?limit=1000")
+    pins = {p["pin"] for p in r.get_json()["parcels"]}
+    assert hidden_pin not in pins
+
+    r2 = pop_client.get("/api/parcels?limit=1000&include_condo_units=true")
+    pins_inc = {p["pin"] for p in r2.get_json()["parcels"]}
+    assert hidden_pin in pins_inc

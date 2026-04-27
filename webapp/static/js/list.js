@@ -5,6 +5,8 @@
   let currentOffset = 0;
   let currentTotal = 0;
   let reqId = 0;
+  let sortBy = '';
+  let sortDir = 'desc';
 
   window.addEventListener('filterchange', () => {
     currentOffset = 0;
@@ -16,10 +18,31 @@
     loadList({replace: false});
   };
 
+  const sortByEl = document.getElementById('sort-by');
+  const sortDirEl = document.getElementById('sort-dir');
+  if (sortByEl && sortDirEl) {
+    sortByEl.addEventListener('change', () => {
+      sortBy = sortByEl.value;
+      currentOffset = 0;
+      loadList({replace: true});
+      window.dispatchEvent(new CustomEvent('sortchange', {detail: {sort: sortBy, dir: sortDir}}));
+    });
+    sortDirEl.addEventListener('click', () => {
+      sortDir = sortDir === 'desc' ? 'asc' : 'desc';
+      sortDirEl.textContent = sortDir === 'desc' ? '↓' : '↑';
+      if (sortBy) {
+        currentOffset = 0;
+        loadList({replace: true});
+        window.dispatchEvent(new CustomEvent('sortchange', {detail: {sort: sortBy, dir: sortDir}}));
+      }
+    });
+  }
+
   async function loadList({replace}) {
     const myId = ++reqId;
     const qs = window.filterStateToQuery();
-    const url = `/api/parcels?${qs}&limit=${LIST_PAGE_SIZE}&offset=${currentOffset}`;
+    const sortQs = sortBy ? `&sort=${encodeURIComponent(sortBy)}&dir=${sortDir}` : '';
+    const url = `/api/parcels?${qs}&limit=${LIST_PAGE_SIZE}&offset=${currentOffset}${sortQs}`;
 
     const list = document.getElementById('parcel-list');
     const loadMore = document.getElementById('load-more');
@@ -91,6 +114,10 @@
     }
     if (p.consolidation_group_id != null) {
       tags.push('<span class="tag llc">Consolidated</span>');
+    }
+    if (p.is_condo_building) {
+      const u = p.condo_unit_count || 0;
+      tags.push(`<span class="tag stage">Condo · ${u} unit${u === 1 ? '' : 's'}</span>`);
     }
     if (p.listing_status === 'listed') {
       tags.push('<span class="tag listed">Listed</span>');

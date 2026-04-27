@@ -40,6 +40,9 @@ def register(app: Flask) -> None:
     def api_parcels():
         filters = _parse_filters(request.args)
         stage = request.args.get("stage") or None
+        include_units = request.args.get("include_condo_units", "").lower() in {"true", "1"}
+        sort = request.args.get("sort") or None
+        direction = request.args.get("dir", "desc")
         try:
             limit = int(request.args.get("limit", DEFAULT_PAGE_SIZE))
             offset = int(request.args.get("offset", 0))
@@ -48,8 +51,17 @@ def register(app: Flask) -> None:
         limit = max(1, min(limit, MAX_PAGE_SIZE))
         offset = max(0, offset)
 
-        list_sql, list_params = build_parcel_query(filters, stage, limit, offset)
-        count_sql, count_params = build_count_query(filters, stage)
+        try:
+            list_sql, list_params = build_parcel_query(
+                filters, stage, limit, offset,
+                include_condo_units=include_units,
+                sort=sort, direction=direction,
+            )
+        except ValueError as e:
+            abort(400, str(e))
+        count_sql, count_params = build_count_query(
+            filters, stage, include_condo_units=include_units
+        )
 
         with closing(_conn()) as conn:
             parcels = [dict(r) for r in conn.execute(list_sql, list_params)]
@@ -86,8 +98,18 @@ def register(app: Flask) -> None:
     def api_map_data():
         filters = _parse_filters(request.args)
         stage = request.args.get("stage") or None
+        include_units = request.args.get("include_condo_units", "").lower() in {"true", "1"}
+        sort = request.args.get("sort") or None
+        direction = request.args.get("dir", "desc")
         # Map gets up to MAP_MAX_PINS pins
-        sql, params = build_parcel_query(filters, stage, limit=MAP_MAX_PINS, offset=0)
+        try:
+            sql, params = build_parcel_query(
+                filters, stage, limit=MAP_MAX_PINS, offset=0,
+                include_condo_units=include_units,
+                sort=sort, direction=direction,
+            )
+        except ValueError as e:
+            abort(400, str(e))
 
         with closing(_conn()) as conn:
             rows = [dict(r) for r in conn.execute(sql, params)]
@@ -146,7 +168,7 @@ def _parse_filters(args) -> dict[str, Any]:
     """
     filters: dict[str, Any] = {}
     for key, value in args.items():
-        if key in {"limit", "offset", "stage", "sort"}:
+        if key in {"limit", "offset", "stage", "sort", "dir", "include_condo_units"}:
             continue
 
         if "." in key:
