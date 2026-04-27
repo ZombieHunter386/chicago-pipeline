@@ -124,6 +124,30 @@ def test_upsert_rows_preserves_columns_on_conflict(tmp_path):
     conn.close()
 
 
+def test_init_db_has_condo_rollup_columns(tmp_path):
+    """Schema must include the columns condo rollup writes to."""
+    db = tmp_path / "ix.db"
+    init_db(db)
+    conn = get_connection(db)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(parcels)")}
+    assert {"is_condo_unit", "is_condo_building", "condo_unit_count"} <= cols
+
+
+def test_init_db_indexes_pin10_and_condo_flags(tmp_path):
+    """The condo rollup groups by pin10 and the UI default-filters on
+    is_condo_unit; both need indexes for the full-geography fetch."""
+    db = tmp_path / "ix.db"
+    init_db(db)
+    conn = get_connection(db)
+    rows = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='parcels'"
+    ).fetchall()
+    names = {r[0] for r in rows}
+    assert "idx_parcels_pin10" in names
+    assert "idx_parcels_is_condo_unit" in names
+    assert "idx_parcels_is_condo_building" in names
+
+
 def test_init_db_creates_filter_and_sort_indexes(tmp_path):
     """Indexes for filter/sort columns must exist after init_db so the UI's
     default queries don't full-scan at full-geography scale."""

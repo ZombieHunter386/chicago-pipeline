@@ -66,6 +66,9 @@ CREATE TABLE IF NOT EXISTS parcels (
     score REAL,
     score_version TEXT,
     consolidation_group_id INTEGER,
+    is_condo_unit INTEGER DEFAULT 0,
+    is_condo_building INTEGER DEFAULT 0,
+    condo_unit_count INTEGER,
     -- Listing (populated in Plan 4)
     listing_status TEXT,
     listing_check_date TEXT,
@@ -85,6 +88,9 @@ CREATE INDEX IF NOT EXISTS idx_parcels_is_absentee ON parcels(is_absentee);
 CREATE INDEX IF NOT EXISTS idx_parcels_is_llc ON parcels(is_llc);
 CREATE INDEX IF NOT EXISTS idx_parcels_tax_delinquent ON parcels(tax_delinquent);
 CREATE INDEX IF NOT EXISTS idx_parcels_consolidation_group_id ON parcels(consolidation_group_id);
+CREATE INDEX IF NOT EXISTS idx_parcels_pin10 ON parcels(pin10);
+CREATE INDEX IF NOT EXISTS idx_parcels_is_condo_unit ON parcels(is_condo_unit);
+CREATE INDEX IF NOT EXISTS idx_parcels_is_condo_building ON parcels(is_condo_building);
 
 -- ============================================================
 -- Consolidation groups — adjacent same-owner parcels
