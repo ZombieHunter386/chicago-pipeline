@@ -14,6 +14,7 @@ from pipeline.config import CONFIG_DIR, GeographyConfig, get_geography
 from pipeline.db import init_db, get_connection
 from pipeline.socrata import SocrataClient
 from pipeline.consolidate import consolidate
+from pipeline.condo_rollup import rollup_condos
 
 from sources import (
     assessor_parcels, assessor_addresses, assessor_characteristics,
@@ -102,6 +103,7 @@ def run_all(geo: GeographyConfig, db_path: Path, app_token: str,
     results.append(_run("cdp_cta_stations", cdp_cta_stations.fetch, db_path, geo, db_path, cdp))
     results.append(_run("clerk_delinquent", clerk_delinquent.fetch, db_path, geo, db_path, None))
     results.append(_run("consolidate", consolidate, db_path, db_path))
+    results.append(_run("condo_rollup", rollup_condos, db_path, db_path))
     return results
 
 

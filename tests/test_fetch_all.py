@@ -87,3 +87,28 @@ def test_run_all_continues_after_single_source_error(tmp_path, monkeypatch, geo)
     assert len(errs) == 1
     assert errs[0].source_name == "assessor_appeals"
     assert len(oks) > 0
+
+
+@responses.activate
+def test_run_all_runs_condo_rollup_after_consolidate(tmp_path, monkeypatch, geo):
+    """The orchestrator must execute condo_rollup as a final step so condo
+    units are aggregated to building level on every fetch."""
+    db = tmp_path / "pipeline.db"
+    from pipeline.db import init_db
+    init_db(db)
+    _register_all(monkeypatch)
+    monkeypatch.setattr("sources.clerk_delinquent.DEFAULT_CSV_PATH", FIXTURES / "delinquent.csv")
+
+    results = fetch_all.run_all(geo, db, app_token="TKN")
+
+    # condo_rollup must appear as a logged step
+    source_names = [r.source_name for r in results]
+    assert "condo_rollup" in source_names
+    assert "consolidate" in source_names
+    # And it must come AFTER consolidate so it sees freshly written assessed_*
+    assert source_names.index("condo_rollup") > source_names.index("consolidate")
+
+    # fetch_log captures the same
+    conn = get_connection(db)
+    logged = {r[0] for r in conn.execute("SELECT source_name FROM fetch_log").fetchall()}
+    assert "condo_rollup" in logged
