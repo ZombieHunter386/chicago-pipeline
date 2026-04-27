@@ -63,7 +63,8 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient,
     conn = get_connection(db_path)
     try:
         rows = conn.execute(
-            "SELECT pin, lat, lng, built_far FROM parcels WHERE lat IS NOT NULL AND lng IS NOT NULL"
+            "SELECT pin, lat, lng, built_far, lot_size_sf FROM parcels "
+            "WHERE lat IS NOT NULL AND lng IS NOT NULL"
         ).fetchall()
     finally:
         conn.close()
@@ -72,6 +73,7 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient,
 
     points = gpd.GeoDataFrame(
         [{"pin": r["pin"], "built_far": r["built_far"],
+          "lot_size_sf": r["lot_size_sf"],
           "geometry": Point(r["lng"], r["lat"])} for r in rows],
         crs="EPSG:4326",
     )
@@ -96,16 +98,27 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient,
             allows_mf = None if zi is None else (1 if zi.allows_multifamily else 0)
             built = j["built_far"]
             far_gap = (max_far / built) if (max_far and built and built > 0) else None
+            min_lot_pu = zi.min_lot_area_per_unit if zi else None
+            lot_raw = j["lot_size_sf"]
+            lot = None if lot_raw is None or pd.isna(lot_raw) else float(lot_raw)
+            max_units = (
+                int(lot // min_lot_pu)
+                if (lot and min_lot_pu and min_lot_pu > 0)
+                else None
+            )
             conn.execute("""
                 UPDATE parcels SET
                     zone_class = :zc,
                     max_far = :max_far,
                     far_gap = :far_gap,
                     allows_multifamily_by_right = :amf,
+                    min_lot_area_per_unit = :mlpu,
+                    max_units_allowed = :mu,
                     last_updated_date = :now
                 WHERE pin = :pin
             """, {"zc": zc, "max_far": max_far, "far_gap": far_gap,
-                  "amf": allows_mf, "now": fetched_at, "pin": j["pin"]})
+                  "amf": allows_mf, "mlpu": min_lot_pu, "mu": max_units,
+                  "now": fetched_at, "pin": j["pin"]})
         conn.commit()
     finally:
         conn.close()

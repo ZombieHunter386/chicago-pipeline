@@ -59,6 +59,8 @@ CREATE TABLE IF NOT EXISTS parcels (
     built_far REAL,
     far_gap REAL,
     allows_multifamily_by_right INTEGER,
+    min_lot_area_per_unit REAL,
+    max_units_allowed INTEGER,
     tif_district TEXT,
     cta_nearest_station TEXT,
     cta_distance_ft REAL,
@@ -91,6 +93,7 @@ CREATE INDEX IF NOT EXISTS idx_parcels_consolidation_group_id ON parcels(consoli
 CREATE INDEX IF NOT EXISTS idx_parcels_pin10 ON parcels(pin10);
 CREATE INDEX IF NOT EXISTS idx_parcels_is_condo_unit ON parcels(is_condo_unit);
 CREATE INDEX IF NOT EXISTS idx_parcels_is_condo_building ON parcels(is_condo_building);
+CREATE INDEX IF NOT EXISTS idx_parcels_max_units_allowed ON parcels(max_units_allowed);
 
 -- ============================================================
 -- Consolidation groups — adjacent same-owner parcels

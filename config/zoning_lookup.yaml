@@ -72,9 +72,9 @@ zones:
   # ============================================================
   RM-4.5:
     max_far: 1.7
-    max_height_ft: 38
+    max_height_ft: 45
     max_density: null
-    min_lot_area_per_unit: 600
+    min_lot_area_per_unit: 700
     setback_front_ft: 15
     setback_side_ft: 4
     setback_rear_ft: 30
@@ -82,7 +82,7 @@ zones:
 
   RM-5:
     max_far: 2.0
-    max_height_ft: 47
+    max_height_ft: 45
     max_density: null
     min_lot_area_per_unit: 400
     setback_front_ft: 15
@@ -92,9 +92,9 @@ zones:
 
   RM-5.5:
     max_far: 2.5
-    max_height_ft: 60
+    max_height_ft: 47
     max_density: null
-    min_lot_area_per_unit: 270
+    min_lot_area_per_unit: 400
     setback_front_ft: 15
     setback_side_ft: 4
     setback_rear_ft: 30
@@ -102,9 +102,9 @@ zones:
 
   RM-6:
     max_far: 4.4
-    max_height_ft: 80
+    max_height_ft: null  # ordinance: "None, but tall buildings require PD review"
     max_density: null
-    min_lot_area_per_unit: 165
+    min_lot_area_per_unit: 300
     setback_front_ft: 15
     setback_side_ft: 4
     setback_rear_ft: 30
@@ -112,9 +112,9 @@ zones:
 
   RM-6.5:
     max_far: 6.6
-    max_height_ft: 100
+    max_height_ft: null  # ordinance: "None, but tall buildings require PD review"
     max_density: null
-    min_lot_area_per_unit: 100
+    min_lot_area_per_unit: 300
     setback_front_ft: 15
     setback_side_ft: 4
     setback_rear_ft: 30
@@ -123,15 +123,17 @@ zones:
   # ============================================================
   # Business (Neighborhood)
   # ============================================================
+  # B/C/M dash-digit lot-area-per-unit (per Chicago Zoning Ordinance / Second
+  # City Zoning): -1 → 2500 sf, -2 → 1000 sf, -3 → 400 sf, -5 → 200 sf.
   B1-1:
     max_far: 1.2
     max_height_ft: 38
-    min_lot_area_per_unit: 1000
+    min_lot_area_per_unit: 2500
     allows_multifamily: true
   B1-2:
     max_far: 2.2
     max_height_ft: 45
-    min_lot_area_per_unit: 600
+    min_lot_area_per_unit: 1000
     allows_multifamily: true
   B1-3:
     max_far: 3.0
@@ -141,18 +143,18 @@ zones:
   B1-5:
     max_far: 5.0
     max_height_ft: 65
-    min_lot_area_per_unit: 300
+    min_lot_area_per_unit: 200
     allows_multifamily: true
 
   B2-1:
     max_far: 1.2
     max_height_ft: 38
-    min_lot_area_per_unit: 1000
+    min_lot_area_per_unit: 2500
     allows_multifamily: true
   B2-2:
     max_far: 2.2
     max_height_ft: 45
-    min_lot_area_per_unit: 600
+    min_lot_area_per_unit: 1000
     allows_multifamily: true
   B2-3:
     max_far: 3.0
@@ -162,18 +164,18 @@ zones:
   B2-5:
     max_far: 5.0
     max_height_ft: 65
-    min_lot_area_per_unit: 300
+    min_lot_area_per_unit: 200
     allows_multifamily: true
 
   B3-1:
     max_far: 1.2
     max_height_ft: 38
-    min_lot_area_per_unit: 1000
+    min_lot_area_per_unit: 2500
     allows_multifamily: true
   B3-2:
     max_far: 2.2
     max_height_ft: 45
-    min_lot_area_per_unit: 600
+    min_lot_area_per_unit: 1000
     allows_multifamily: true
   B3-3:
     max_far: 3.0
@@ -183,7 +185,7 @@ zones:
   B3-5:
     max_far: 5.0
     max_height_ft: 65
-    min_lot_area_per_unit: 300
+    min_lot_area_per_unit: 200
     allows_multifamily: true
 
   # ============================================================
@@ -192,12 +194,12 @@ zones:
   C1-1:
     max_far: 1.2
     max_height_ft: 38
-    min_lot_area_per_unit: 1000
+    min_lot_area_per_unit: 2500
     allows_multifamily: true
   C1-2:
     max_far: 2.2
     max_height_ft: 45
-    min_lot_area_per_unit: 600
+    min_lot_area_per_unit: 1000
     allows_multifamily: true
   C1-3:
     max_far: 3.0
@@ -207,18 +209,18 @@ zones:
   C1-5:
     max_far: 5.0
     max_height_ft: 65
-    min_lot_area_per_unit: 300
+    min_lot_area_per_unit: 200
     allows_multifamily: true
 
   C2-1:
     max_far: 1.2
     max_height_ft: 38
-    min_lot_area_per_unit: 1000
+    min_lot_area_per_unit: 2500
     allows_multifamily: true
   C2-2:
     max_far: 2.2
     max_height_ft: 45
-    min_lot_area_per_unit: 600
+    min_lot_area_per_unit: 1000
     allows_multifamily: true
   C2-3:
     max_far: 3.0
@@ -228,24 +230,28 @@ zones:
   C2-5:
     max_far: 5.0
     max_height_ft: 65
-    min_lot_area_per_unit: 300
+    min_lot_area_per_unit: 200
     allows_multifamily: true
 
   C3-1:
     max_far: 1.2
     max_height_ft: 38
+    min_lot_area_per_unit: 2500
     allows_multifamily: true
   C3-2:
     max_far: 2.2
     max_height_ft: 45
+    min_lot_area_per_unit: 1000
     allows_multifamily: true
   C3-3:
     max_far: 3.0
     max_height_ft: 50
+    min_lot_area_per_unit: 400
     allows_multifamily: true
   C3-5:
     max_far: 5.0
     max_height_ft: 65
+    min_lot_area_per_unit: 200
     allows_multifamily: true
 
   # ============================================================
@@ -290,56 +296,74 @@ zones:
     allows_multifamily: false
 
   # ============================================================
-  # Downtown — base FARs (bonuses can raise materially via
-  # transit-served-location, affordable-housing, etc.).
+  # Downtown — base FARs (bonuses can raise materially via the
+  # Neighborhood Opportunity Bonus, transit-served-location, ARO
+  # affordable-housing premiums, etc.).
   # ============================================================
-  DC:
+  DC-12:
+    max_far: 12.0
+    max_height_ft: null
+    min_lot_area_per_unit: 115
+    allows_multifamily: true
+  DC-16:
     max_far: 16.0
     max_height_ft: null
+    min_lot_area_per_unit: 100
     allows_multifamily: true
   DX-3:
     max_far: 3.0
     max_height_ft: null
+    min_lot_area_per_unit: 400
     allows_multifamily: true
   DX-5:
     max_far: 5.0
     max_height_ft: null
+    min_lot_area_per_unit: 200
     allows_multifamily: true
   DX-7:
     max_far: 7.0
     max_height_ft: null
+    min_lot_area_per_unit: 145
     allows_multifamily: true
   DX-12:
     max_far: 12.0
     max_height_ft: null
+    min_lot_area_per_unit: 115
     allows_multifamily: true
   DX-16:
     max_far: 16.0
     max_height_ft: null
+    min_lot_area_per_unit: 100
     allows_multifamily: true
   DR-3:
     max_far: 3.0
     max_height_ft: null
+    min_lot_area_per_unit: 400
     allows_multifamily: true
   DR-5:
     max_far: 5.0
     max_height_ft: null
+    min_lot_area_per_unit: 200
     allows_multifamily: true
   DR-7:
     max_far: 7.0
     max_height_ft: null
+    min_lot_area_per_unit: 145
     allows_multifamily: true
   DR-10:
     max_far: 10.0
     max_height_ft: null
+    min_lot_area_per_unit: 115
     allows_multifamily: true
   DS-3:
     max_far: 3.0
     max_height_ft: null
+    min_lot_area_per_unit: 400
     allows_multifamily: true
   DS-5:
     max_far: 5.0
     max_height_ft: null
+    min_lot_area_per_unit: 200
     allows_multifamily: true
 
   # ============================================================

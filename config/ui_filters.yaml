@@ -75,8 +75,17 @@ filter_groups:
       - column: allows_multifamily_by_right
         label: Multifamily by right
         type: checkbox
+      - column: max_far
+        label: Max FAR (by-right)
+        type: range
       - column: far_gap
         label: FAR gap
+        type: range
+      - column: min_lot_area_per_unit
+        label: Min lot area / unit (sf)
+        type: range
+      - column: max_units_allowed
+        label: Max units allowed
         type: range
       - column: tif_district
         label: In TIF district

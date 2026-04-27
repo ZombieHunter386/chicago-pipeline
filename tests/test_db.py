@@ -131,6 +131,7 @@ def test_init_db_has_condo_rollup_columns(tmp_path):
     conn = get_connection(db)
     cols = {r[1] for r in conn.execute("PRAGMA table_info(parcels)")}
     assert {"is_condo_unit", "is_condo_building", "condo_unit_count"} <= cols
+    assert {"min_lot_area_per_unit", "max_units_allowed"} <= cols
 
 
 def test_init_db_indexes_pin10_and_condo_flags(tmp_path):

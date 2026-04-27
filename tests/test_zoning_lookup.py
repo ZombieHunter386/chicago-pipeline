@@ -45,7 +45,7 @@ def test_project_lookup_covers_common_chicago_zones():
         "C2-1", "C2-2", "C2-3", "C2-5",
         "C3-1", "C3-2", "C3-3", "C3-5",
         "M1-1", "M1-2", "M1-3",
-        "DC", "DX-3", "DX-5", "DX-7", "DX-12", "DX-16",
+        "DC-12", "DC-16", "DX-3", "DX-5", "DX-7", "DX-12", "DX-16",
     ]
     missing = [z for z in expected if z not in zl]
     assert not missing, f"Missing zones in project lookup: {missing}"
