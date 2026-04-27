@@ -7,8 +7,8 @@ CONFIG = Path(__file__).resolve().parent.parent / "config" / "ui_filters.yaml"
 def test_schema_has_expected_groups(populated_db_path):
     schema = build_filter_schema(populated_db_path, CONFIG)
     group_names = [g["group"] for g in schema["filter_groups"]]
-    assert group_names == ["Score", "Owner", "Property", "Zoning",
-                           "Motivation Signals", "Financial"]
+    assert group_names == ["Score", "Location", "Owner", "Condo", "Property",
+                           "Zoning", "Motivation Signals", "Financial"]
 
 
 def test_range_filter_emits_min_max(populated_db_path):

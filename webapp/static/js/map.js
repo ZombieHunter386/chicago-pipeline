@@ -20,8 +20,18 @@
     top: true, consolidated: true, outreach: true, listed: true, other: true,
   };
 
+  let mapSortBy = '';
+  let mapSortDir = 'desc';
+
   initMap();
   window.addEventListener('filterchange', loadMap);
+  window.addEventListener('sortchange', (e) => {
+    if (e && e.detail) {
+      mapSortBy = e.detail.sort || '';
+      mapSortDir = e.detail.dir || 'desc';
+    }
+    loadMap();
+  });
   window.addEventListener('parcelselect', (e) => {
     if (e && e.detail && e.detail.pin != null) {
       highlightSelection(e.detail.pin);
@@ -51,9 +61,10 @@
   async function loadMap() {
     const myId = ++reqId;
     const qs = window.filterStateToQuery ? window.filterStateToQuery() : '';
+    const sortQs = mapSortBy ? `&sort=${encodeURIComponent(mapSortBy)}&dir=${mapSortDir}` : '';
     let geo;
     try {
-      const r = await fetch(`/api/map-data?${qs}`);
+      const r = await fetch(`/api/map-data?${qs}${sortQs}`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       geo = await r.json();
     } catch (err) {

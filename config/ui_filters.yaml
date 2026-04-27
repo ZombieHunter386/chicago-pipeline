@@ -16,6 +16,18 @@ filter_groups:
         label: Score
         type: range
 
+  - group: Location
+    filters:
+      - column: address
+        label: Address
+        type: text_search
+      - column: ward_num
+        label: Ward
+        type: dropdown
+      - column: cta_distance_ft
+        label: CTA distance (ft)
+        type: range
+
   - group: Owner
     filters:
       - column: is_absentee
@@ -28,6 +40,15 @@ filter_groups:
         label: Owner name
         type: text_search
 
+  - group: Condo
+    filters:
+      - column: is_condo_building
+        label: Condo building
+        type: checkbox
+      - column: condo_unit_count
+        label: Unit count
+        type: range
+
   - group: Property
     filters:
       - column: property_class
@@ -35,6 +56,9 @@ filter_groups:
         type: dropdown
       - column: lot_size_sf
         label: Lot size (SF)
+        type: range
+      - column: building_sf
+        label: Building (SF)
         type: range
       - column: year_built
         label: Year built
@@ -66,11 +90,17 @@ filter_groups:
       - column: open_violations_count
         label: Open violations (min)
         type: range
+      - column: oldest_violation_age_days
+        label: Oldest violation age (days)
+        type: range
       - column: has_vacancy_report
         label: Vacancy report
         type: checkbox
       - column: years_since_last_permit
         label: Years since last permit
+        type: range
+      - column: appeal_count
+        label: Appeal count
         type: range
       - column: hold_duration_years
         label: Hold duration (years)
@@ -81,12 +111,21 @@ filter_groups:
       - column: assessed_total
         label: Assessed value
         type: range
+      - column: estimated_annual_tax
+        label: Annual tax (estimated)
+        type: range
       - column: land_building_ratio
         label: Land/bldg ratio
         type: range
       - column: tax_increase_pct_5yr
         label: Tax increase 5yr (%)
         type: range
+      - column: last_sale_price
+        label: Last sale price
+        type: range
+      - column: last_sale_date
+        label: Last sale date
+        type: date_range
 
 stage_pills:
   column: stage

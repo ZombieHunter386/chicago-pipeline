@@ -30,6 +30,35 @@
       <span class="count-label" id="count-label">— of —</span>
     </div>
     <div class="filter-row" id="stage-pills"></div>
+    <div class="sort-row" style="padding: 8px 16px; display:flex; gap:6px; align-items:center; border-bottom:1px solid #30363d;">
+      <label for="sort-by" style="color:#8b949e; font-size:11px; flex:0 0 auto;">Sort:</label>
+      <select id="sort-by" style="flex:1; background:#0d1117; color:#c9d1d9; border:1px solid #30363d; border-radius:4px; padding:4px;">
+        <option value="">Default (recently updated)</option>
+        <option value="assessed_total">Assessed value</option>
+        <option value="estimated_annual_tax">Annual tax</option>
+        <option value="lot_size_sf">Lot size</option>
+        <option value="year_built">Year built</option>
+        <option value="hold_duration_years">Hold duration</option>
+        <option value="last_sale_price">Last sale price</option>
+        <option value="last_sale_date">Last sale date</option>
+        <option value="building_sf">Building SF</option>
+        <option value="far_gap">FAR gap</option>
+        <option value="open_violations_count">Open violations</option>
+        <option value="years_since_last_permit">Years since permit</option>
+        <option value="appeal_count">Appeal count</option>
+        <option value="oldest_violation_age_days">Oldest violation age</option>
+        <option value="cta_distance_ft">CTA distance</option>
+        <option value="condo_unit_count">Condo unit count</option>
+        <option value="tax_increase_pct_5yr">Tax increase 5yr</option>
+        <option value="land_building_ratio">Land/bldg ratio</option>
+        <option value="first_seen_date">First seen</option>
+        <option value="last_updated_date">Last updated</option>
+        <option value="score">Score</option>
+        <option value="address">Address</option>
+        <option value="owner_name">Owner name</option>
+      </select>
+      <button id="sort-dir" type="button" title="Toggle sort direction" aria-label="Toggle sort direction" style="background:#21262d; color:#c9d1d9; border:1px solid #30363d; border-radius:4px; padding:4px 8px; cursor:pointer;">↓</button>
+    </div>
     <div class="filter-toggle-row">
       <button class="filter-toggle-btn" id="filter-toggle" aria-expanded="false" aria-controls="filter-panel">
         <span class="arrow" aria-hidden="true">▸</span> Filters <span class="active-filter-count" id="active-filter-count">0</span>
