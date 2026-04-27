@@ -1,6 +1,8 @@
 import json
 import responses
-from sources import assessor_parcels, assessor_characteristics, cdp_zoning
+from sources import (
+    assessor_parcels, assessor_characteristics, ccgis_parcels, cdp_zoning,
+)
 from pipeline.db import get_connection
 from tests.conftest import FIXTURES
 
@@ -25,6 +27,17 @@ def test_cdp_zoning_assigns_zone_class_and_far_gap(db_path, geo, cook_client, cd
         f"https://datacatalog.cookcountyil.gov/resource/{assessor_characteristics.DATASET_ID}.json",
         json=[], status=200)
     assessor_characteristics.fetch(geo, db_path, cook_client)
+
+    # ccgis_parcels writes lot_size_sf from polygon area; cdp_zoning depends
+    # on it for max_units_allowed and far_gap.
+    gx = json.loads((FIXTURES / "ccgis_parcels.json").read_text())
+    responses.add(responses.GET,
+        f"https://datacatalog.cookcountyil.gov/resource/{ccgis_parcels.DATASET_ID}.json",
+        json=gx, status=200)
+    responses.add(responses.GET,
+        f"https://datacatalog.cookcountyil.gov/resource/{ccgis_parcels.DATASET_ID}.json",
+        json=[], status=200)
+    ccgis_parcels.fetch(geo, db_path, cook_client)
 
     # Insert a parcel inside the geo polygon but OUTSIDE the zoning polygon
     # (zoning bbox is lng -87.67..-87.62; this one sits at lng -87.68).

@@ -83,26 +83,26 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient) -> int:
         if r["pin"] not in by_pin:
             by_pin[r["pin"]] = r
 
+    # NOTE: lot_size_sf and built_far are NOT written here. The GIS parcel
+    # source (ccgis_parcels) is the source of truth for lot_size_sf because
+    # it covers condos and vacant lots that have no characteristics record;
+    # built_far is recomputed there once both lot and building are known.
     conn = get_connection(db_path)
     try:
         for pin, r in by_pin.items():
-            lot = r["char_land_sf"]
             bldg = r["char_bldg_sf"]
-            built_far = round(bldg / lot, 2) if (lot and bldg and lot > 0) else None
             condition = r["char_repair_cnd"] or r["cdu"]
             yr = _i(r["char_yrblt"])
             conn.execute("""
                 UPDATE parcels SET
-                    lot_size_sf = :lot,
                     building_sf = :bldg,
                     year_built = :yr,
                     condition = :condition,
                     building_classification = :bclass,
-                    built_far = :bfar,
                     last_updated_date = :now
                 WHERE pin = :pin
-            """, {"lot": lot, "bldg": bldg, "yr": yr, "condition": condition,
-                  "bclass": r["char_type_resd"], "bfar": built_far,
+            """, {"bldg": bldg, "yr": yr, "condition": condition,
+                  "bclass": r["char_type_resd"],
                   "now": fetched_at, "pin": pin})
         conn.commit()
     finally:

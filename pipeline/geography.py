@@ -49,3 +49,20 @@ def bbox_where_clause(
         f"{lat_field} between {min_lat} and {max_lat} "
         f"AND {lng_field} between {min_lng} and {max_lng}"
     )
+
+
+def bbox_polygon_wkt(geo: GeographyConfig) -> str:
+    """WKT polygon describing geo.bbox, suitable for Socrata intersects()."""
+    min_lat, max_lat, min_lng, max_lng = geo.bbox
+    return (
+        f"POLYGON(({min_lng} {min_lat},{max_lng} {min_lat},"
+        f"{max_lng} {max_lat},{min_lng} {max_lat},{min_lng} {min_lat}))"
+    )
+
+
+def geom_intersects_clause(
+    geo: GeographyConfig, geom_field: str = "the_geom"
+) -> str:
+    """SoQL $where filtering rows whose geometry intersects the geo bbox.
+    Used for datasets keyed on a polygon column rather than lat/lng pair."""
+    return f"intersects({geom_field}, '{bbox_polygon_wkt(geo)}')"

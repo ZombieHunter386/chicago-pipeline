@@ -11,6 +11,7 @@ def _register_all(monkeypatch):
     from sources import (
         assessor_parcels, assessor_addresses, assessor_characteristics,
         assessor_values, assessor_sales, assessor_appeals, assessor_exempt,
+        ccgis_parcels,
         cdp_zoning, cdp_permits, cdp_violations, cdp_vacant, cdp_cta_stations,
     )
     from sources.assessor_sales import TODAY as _    # just to ensure import
@@ -27,6 +28,7 @@ def _register_all(monkeypatch):
         (assessor_sales.DATASET_ID, "assessor_sales.json"),
         (assessor_appeals.DATASET_ID, "assessor_appeals.json"),
         (assessor_exempt.DATASET_ID, "assessor_exempt.json"),
+        (ccgis_parcels.DATASET_ID, "ccgis_parcels.json"),
     ]:
         fx = json.loads((FIXTURES / fname).read_text())
         responses.add(responses.GET, f"{cc}/{ds}.json", json=fx, status=200)

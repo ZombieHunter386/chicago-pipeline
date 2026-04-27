@@ -19,6 +19,7 @@ from pipeline.condo_rollup import rollup_condos
 from sources import (
     assessor_parcels, assessor_addresses, assessor_characteristics,
     assessor_values, assessor_sales, assessor_appeals, assessor_exempt,
+    ccgis_parcels,
     cdp_zoning, cdp_permits, cdp_violations, cdp_vacant, cdp_cta_stations,
     clerk_delinquent,
 )
@@ -92,6 +93,9 @@ def run_all(geo: GeographyConfig, db_path: Path, app_token: str,
     results.append(_run("assessor_parcels", assessor_parcels.fetch, db_path, geo, db_path, cook))
     results.append(_run("assessor_addresses", assessor_addresses.fetch, db_path, geo, db_path, cook))
     results.append(_run("assessor_characteristics", assessor_characteristics.fetch, db_path, geo, db_path, cook))
+    # ccgis_parcels writes lot_size_sf from polygon area; runs after
+    # characteristics so it can recompute built_far against the new lot.
+    results.append(_run("ccgis_parcels", ccgis_parcels.fetch, db_path, geo, db_path, cook))
     results.append(_run("assessor_values", assessor_values.fetch, db_path, geo, db_path, cook))
     results.append(_run("assessor_sales", assessor_sales.fetch, db_path, geo, db_path, cook))
     results.append(_run("assessor_appeals", assessor_appeals.fetch, db_path, geo, db_path, cook))

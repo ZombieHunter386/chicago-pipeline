@@ -6,7 +6,11 @@ from tests.conftest import FIXTURES
 
 
 @responses.activate
-def test_characteristics_populates_building_facts_and_built_far(db_path, geo, cook_client):
+def test_characteristics_populates_building_facts(db_path, geo, cook_client):
+    """After GIS-first lot sizing, characteristics writes only the building
+    facts (building_sf, year_built, condition, classification). lot_size_sf
+    and built_far are now derived from ccgis_parcels — see that source's
+    test for the lot+built_far flow."""
     parcels_fixture = json.loads((FIXTURES / "assessor_parcels.json").read_text())
     responses.add(responses.GET,
         f"https://datacatalog.cookcountyil.gov/resource/{assessor_parcels.DATASET_ID}.json",
@@ -32,9 +36,12 @@ def test_characteristics_populates_building_facts_and_built_far(db_path, geo, co
                building_classification
         FROM parcels WHERE pin='14210010010000'
     """).fetchone()
-    assert p["lot_size_sf"] == 3750.0
+    # lot_size_sf and built_far are NOT written by characteristics anymore
+    # — they're set by ccgis_parcels and then recomputed.
+    assert p["lot_size_sf"] is None
+    assert p["built_far"] is None
+    # Building-fact columns still come from characteristics.
     assert p["building_sf"] == 2400.0
     assert p["year_built"] == 1923
     assert p["condition"] == "Fair"
-    assert p["built_far"] == 0.64  # 2400/3750 rounded to 2dp
     assert p["building_classification"] == "2 Story"

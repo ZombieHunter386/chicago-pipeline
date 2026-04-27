@@ -358,6 +358,13 @@ CREATE TABLE IF NOT EXISTS raw_cdp_cta_stations (
     fetched_at TEXT
 );
 
+-- Source 1H: Cook County GIS Parcel Boundaries (polygon area)
+CREATE TABLE IF NOT EXISTS raw_ccgis_parcels (
+    pin10 TEXT PRIMARY KEY,
+    area_sf REAL,
+    fetched_at TEXT
+);
+
 -- Source 3A: Cook County Clerk — Delinquent Property Tax
 CREATE TABLE IF NOT EXISTS raw_clerk_delinquent (
     pin TEXT PRIMARY KEY,
