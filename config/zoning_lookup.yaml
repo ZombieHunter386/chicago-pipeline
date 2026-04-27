@@ -1,8 +1,39 @@
 # Chicago zone class → development limits.
-# Sources: Chicago Zoning Ordinance, Second City Zoning (https://secondcityzoning.org).
-# Add new zone classes here as the geography expands.
+# Sources: Chicago Zoning Ordinance (Title 17 Municipal Code), Second City Zoning
+# (https://secondcityzoning.org). Add new zone classes here as the geography
+# expands.
+#
+# Naming convention for B/C/M/D zones: the digit after the dash is the FAR
+# class. -1 = 1.2 FAR, -2 = 2.2 FAR, -3 = 3.0 FAR, -5 = 5.0 FAR. RM zones
+# follow a different scale (RM-4.5 → 1.7, RM-5 → 2.0, …, RM-6.5 → 6.6).
+# Downtown (DC/DX/DR/DS) FARs vary by parcel and bonuses; we record the
+# default allowance with no bonuses applied — actual entitlement may be
+# higher.
 
 zones:
+  # ============================================================
+  # Residential single-family
+  # ============================================================
+  RS-1:
+    max_far: 0.5
+    max_height_ft: 30
+    max_density: null
+    min_lot_area_per_unit: 6250
+    setback_front_ft: 20
+    setback_side_ft: 4
+    setback_rear_ft: 30
+    allows_multifamily: false
+
+  RS-2:
+    max_far: 0.65
+    max_height_ft: 30
+    max_density: null
+    min_lot_area_per_unit: 5000
+    setback_front_ft: 15
+    setback_side_ft: 4
+    setback_rear_ft: 30
+    allows_multifamily: false
+
   RS-3:
     max_far: 0.9
     max_height_ft: 30
@@ -13,6 +44,9 @@ zones:
     setback_rear_ft: 30
     allows_multifamily: false
 
+  # ============================================================
+  # Residential two-flat / townhouse
+  # ============================================================
   RT-3.5:
     max_far: 1.05
     max_height_ft: 35
@@ -33,6 +67,9 @@ zones:
     setback_rear_ft: 30
     allows_multifamily: true
 
+  # ============================================================
+  # Residential multi-family
+  # ============================================================
   RM-4.5:
     max_far: 1.7
     max_height_ft: 38
@@ -73,72 +110,251 @@ zones:
     setback_rear_ft: 30
     allows_multifamily: true
 
+  RM-6.5:
+    max_far: 6.6
+    max_height_ft: 100
+    max_density: null
+    min_lot_area_per_unit: 100
+    setback_front_ft: 15
+    setback_side_ft: 4
+    setback_rear_ft: 30
+    allows_multifamily: true
+
+  # ============================================================
+  # Business (Neighborhood)
+  # ============================================================
   B1-1:
     max_far: 1.2
     max_height_ft: 38
-    max_density: null
     min_lot_area_per_unit: 1000
-    setback_front_ft: 0
-    setback_side_ft: 0
-    setback_rear_ft: 30
+    allows_multifamily: true
+  B1-2:
+    max_far: 2.2
+    max_height_ft: 45
+    min_lot_area_per_unit: 600
+    allows_multifamily: true
+  B1-3:
+    max_far: 3.0
+    max_height_ft: 50
+    min_lot_area_per_unit: 400
+    allows_multifamily: true
+  B1-5:
+    max_far: 5.0
+    max_height_ft: 65
+    min_lot_area_per_unit: 300
     allows_multifamily: true
 
+  B2-1:
+    max_far: 1.2
+    max_height_ft: 38
+    min_lot_area_per_unit: 1000
+    allows_multifamily: true
+  B2-2:
+    max_far: 2.2
+    max_height_ft: 45
+    min_lot_area_per_unit: 600
+    allows_multifamily: true
   B2-3:
     max_far: 3.0
     max_height_ft: 50
-    max_density: null
     min_lot_area_per_unit: 400
-    setback_front_ft: 0
-    setback_side_ft: 0
-    setback_rear_ft: 30
     allows_multifamily: true
-
   B2-5:
     max_far: 5.0
     max_height_ft: 65
-    max_density: null
     min_lot_area_per_unit: 300
-    setback_front_ft: 0
-    setback_side_ft: 0
-    setback_rear_ft: 30
     allows_multifamily: true
 
+  B3-1:
+    max_far: 1.2
+    max_height_ft: 38
+    min_lot_area_per_unit: 1000
+    allows_multifamily: true
   B3-2:
     max_far: 2.2
     max_height_ft: 45
-    max_density: null
     min_lot_area_per_unit: 600
-    setback_front_ft: 0
-    setback_side_ft: 0
-    setback_rear_ft: 30
     allows_multifamily: true
-
   B3-3:
     max_far: 3.0
     max_height_ft: 50
-    max_density: null
     min_lot_area_per_unit: 400
-    setback_front_ft: 0
-    setback_side_ft: 0
-    setback_rear_ft: 30
+    allows_multifamily: true
+  B3-5:
+    max_far: 5.0
+    max_height_ft: 65
+    min_lot_area_per_unit: 300
     allows_multifamily: true
 
+  # ============================================================
+  # Commercial
+  # ============================================================
+  C1-1:
+    max_far: 1.2
+    max_height_ft: 38
+    min_lot_area_per_unit: 1000
+    allows_multifamily: true
+  C1-2:
+    max_far: 2.2
+    max_height_ft: 45
+    min_lot_area_per_unit: 600
+    allows_multifamily: true
   C1-3:
     max_far: 3.0
     max_height_ft: 50
-    max_density: null
     min_lot_area_per_unit: 400
-    setback_front_ft: 0
-    setback_side_ft: 0
-    setback_rear_ft: 30
     allows_multifamily: true
-
   C1-5:
     max_far: 5.0
     max_height_ft: 65
-    max_density: null
     min_lot_area_per_unit: 300
-    setback_front_ft: 0
-    setback_side_ft: 0
-    setback_rear_ft: 30
     allows_multifamily: true
+
+  C2-1:
+    max_far: 1.2
+    max_height_ft: 38
+    min_lot_area_per_unit: 1000
+    allows_multifamily: true
+  C2-2:
+    max_far: 2.2
+    max_height_ft: 45
+    min_lot_area_per_unit: 600
+    allows_multifamily: true
+  C2-3:
+    max_far: 3.0
+    max_height_ft: 50
+    min_lot_area_per_unit: 400
+    allows_multifamily: true
+  C2-5:
+    max_far: 5.0
+    max_height_ft: 65
+    min_lot_area_per_unit: 300
+    allows_multifamily: true
+
+  C3-1:
+    max_far: 1.2
+    max_height_ft: 38
+    allows_multifamily: true
+  C3-2:
+    max_far: 2.2
+    max_height_ft: 45
+    allows_multifamily: true
+  C3-3:
+    max_far: 3.0
+    max_height_ft: 50
+    allows_multifamily: true
+  C3-5:
+    max_far: 5.0
+    max_height_ft: 65
+    allows_multifamily: true
+
+  # ============================================================
+  # Manufacturing — multifamily not by-right (mixed-use possible
+  # via PD or special use, but we set the flag conservatively).
+  # ============================================================
+  M1-1:
+    max_far: 1.2
+    max_height_ft: 45
+    allows_multifamily: false
+  M1-2:
+    max_far: 2.2
+    max_height_ft: 60
+    allows_multifamily: false
+  M1-3:
+    max_far: 3.0
+    max_height_ft: 70
+    allows_multifamily: false
+  M2-1:
+    max_far: 1.2
+    max_height_ft: 45
+    allows_multifamily: false
+  M2-2:
+    max_far: 2.2
+    max_height_ft: 60
+    allows_multifamily: false
+  M2-3:
+    max_far: 3.0
+    max_height_ft: 70
+    allows_multifamily: false
+  M3-1:
+    max_far: 1.2
+    max_height_ft: 45
+    allows_multifamily: false
+  M3-2:
+    max_far: 2.2
+    max_height_ft: 60
+    allows_multifamily: false
+  M3-3:
+    max_far: 3.0
+    max_height_ft: 70
+    allows_multifamily: false
+
+  # ============================================================
+  # Downtown — base FARs (bonuses can raise materially via
+  # transit-served-location, affordable-housing, etc.).
+  # ============================================================
+  DC:
+    max_far: 16.0
+    max_height_ft: null
+    allows_multifamily: true
+  DX-3:
+    max_far: 3.0
+    max_height_ft: null
+    allows_multifamily: true
+  DX-5:
+    max_far: 5.0
+    max_height_ft: null
+    allows_multifamily: true
+  DX-7:
+    max_far: 7.0
+    max_height_ft: null
+    allows_multifamily: true
+  DX-12:
+    max_far: 12.0
+    max_height_ft: null
+    allows_multifamily: true
+  DX-16:
+    max_far: 16.0
+    max_height_ft: null
+    allows_multifamily: true
+  DR-3:
+    max_far: 3.0
+    max_height_ft: null
+    allows_multifamily: true
+  DR-5:
+    max_far: 5.0
+    max_height_ft: null
+    allows_multifamily: true
+  DR-7:
+    max_far: 7.0
+    max_height_ft: null
+    allows_multifamily: true
+  DR-10:
+    max_far: 10.0
+    max_height_ft: null
+    allows_multifamily: true
+  DS-3:
+    max_far: 3.0
+    max_height_ft: null
+    allows_multifamily: true
+  DS-5:
+    max_far: 5.0
+    max_height_ft: null
+    allows_multifamily: true
+
+  # ============================================================
+  # Parks / Open Space / Transportation — not for development.
+  # max_far left null intentionally.
+  # ============================================================
+  POS-1:
+    max_far: null
+    allows_multifamily: false
+  POS-2:
+    max_far: null
+    allows_multifamily: false
+  POS-3:
+    max_far: null
+    allows_multifamily: false
+  T:
+    max_far: null
+    allows_multifamily: false
