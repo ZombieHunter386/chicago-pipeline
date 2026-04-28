@@ -171,9 +171,22 @@ def build_training_table(
             continue
         eligible.append(r)
 
+    # Track the eligibility funnel so the report can show it.
+    funnel = {
+        "total_parcels": len(rows),
+        "after_exempt_drop": sum(1 for r in rows if r["pin"] not in exempt_pins),
+        "after_no_zone_drop": sum(1 for r in rows
+                                  if r["pin"] not in exempt_pins and r["zone_class"]),
+        "after_pd_drop": sum(1 for r in rows
+                             if r["pin"] not in exempt_pins and r["zone_class"]
+                             and not _is_pd_zone(r["zone_class"])),
+        "after_condo_unit_drop": len(eligible),
+    }
+
     if not eligible:
         df = pd.DataFrame(columns=["pin", "label"] + columns)
         df.attrs["imputation_rates"] = {}
+        df.attrs["funnel"] = funnel
         return df
 
     df = pd.DataFrame(eligible)[["pin"] + columns].copy()
@@ -193,6 +206,7 @@ def build_training_table(
             df[col] = df[col].fillna(0).astype(int)
 
     df.attrs["imputation_rates"] = imputation_rates
+    df.attrs["funnel"] = funnel
     return df
 
 
@@ -512,13 +526,34 @@ def write_analysis_report(
     path.write_text("\n".join(lines))
 
 
+SCORING_VERSION_PREFIX = "1.0.0"
+
+
 def analyze(
     db_path: Path,
     geo: GeographyConfig,
     scoring_yaml_path: Path,
     report_md_path: Path,
 ) -> None:
-    """Entry point — orchestrates positive identification, training-set
-    construction, regression fitting, weight derivation, and writing the
-    two output files. Filled in across Tasks 3-10."""
-    raise NotImplementedError("Implemented in Task 10")
+    """Orchestrate: positives → training set → distributions → regression →
+    weights → write yaml + report."""
+    positives = identify_positive_examples(db_path)
+    df = build_training_table(db_path, positives)
+    distributions = compare_distributions(df)
+    regression = fit_logistic_regression(df)
+    weights = derive_weights(regression)
+
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
+    version = f"{SCORING_VERSION_PREFIX}-{today}"
+    write_scoring_yaml(weights, version=version, top_n=20, path=scoring_yaml_path)
+    write_analysis_report(
+        path=report_md_path,
+        db_path=db_path,
+        geo_name=getattr(geo, "name", "unknown"),
+        n_positive=len(positives),
+        funnel=df.attrs.get("funnel", {}),
+        imputation=df.attrs.get("imputation_rates", {}),
+        distributions=distributions,
+        weights=weights,
+        version=version,
+    )

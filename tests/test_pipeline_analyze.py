@@ -176,6 +176,8 @@ def test_build_training_table_basic_shape(tmp_path):
     # Every signal column must be present.
     for col, _kind, _src in analyze.SIGNALS:
         assert col in df.columns
+    assert df.attrs["funnel"]["total_parcels"] == 2
+    assert df.attrs["funnel"]["after_condo_unit_drop"] == 2
 
 
 def test_build_training_table_drops_tax_exempt(tmp_path):
@@ -449,3 +451,60 @@ def test_write_analysis_report_contains_required_sections(tmp_path):
     assert "Caveats" in body
     assert "tax_delinquent" in body  # the missing signal must be called out
     assert "snapshot" in body.lower()  # snapshot-fidelity caveat
+
+
+def test_analyze_end_to_end_writes_yaml_and_report(tmp_path):
+    """Smoke test: run the full orchestrator on a tiny synthetic DB and confirm
+    both output files are written with the expected top-level shape."""
+    parcels = []
+    permits = []
+    # 5 positives — large lots, LLC owners, longer hold
+    for i in range(5):
+        pin = f"14210010{i:03d}0000"
+        parcels.append(_parcel_row(pin, lot_size_sf=8000.0 + i * 200,
+                                   hold_duration_years=20.0,
+                                   is_llc=1,
+                                   address=f"{100 + i} W FAKE ST",
+                                   lat=41.93 + i * 0.0001,
+                                   lng=-87.65 + i * 0.0001))
+        permits.append({
+            "permit_number": f"perm-{i}",
+            "permit_type": "PERMIT - NEW CONSTRUCTION",
+            "issue_date": "2018-05-12",
+            "street_number": str(100 + i), "street_direction": "W",
+            "street_name": "FAKE ST",
+            "latitude": 41.93 + i * 0.0001, "longitude": -87.65 + i * 0.0001,
+        })
+    # 25 negatives — smaller lots, mostly individual owners, shorter hold
+    for i in range(25):
+        pin = f"14210020{i:03d}0000"
+        parcels.append(_parcel_row(pin, lot_size_sf=3500.0 + i * 50,
+                                   hold_duration_years=4.0,
+                                   is_llc=0,
+                                   address=f"{200 + i} W OTHER ST",
+                                   lat=41.94 + i * 0.0001,
+                                   lng=-87.66 + i * 0.0001))
+    db_path = _build_analyze_db(tmp_path, parcels, permits)
+    geo = type("G", (), {"name": "Test Geography"})()  # duck-typed GeographyConfig
+    scoring_yaml = tmp_path / "scoring.yaml"
+    report_md = tmp_path / "report.md"
+
+    analyze.analyze(db_path=db_path, geo=geo,
+                    scoring_yaml_path=scoring_yaml, report_md_path=report_md)
+
+    # YAML
+    assert scoring_yaml.exists()
+    loaded = yaml.safe_load(scoring_yaml.read_text())
+    assert "version" in loaded
+    assert "generated_at" in loaded
+    assert "signals" in loaded
+    # Every SIGNAL must appear in the YAML, even insignificant ones.
+    for col, _kind, _src in analyze.SIGNALS:
+        assert col in loaded["signals"]
+
+    # Report
+    assert report_md.exists()
+    body = report_md.read_text()
+    assert "Test Geography" in body
+    assert "Initial Scoring Weights" in body
+    assert "Caveats" in body
