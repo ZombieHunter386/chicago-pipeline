@@ -192,6 +192,43 @@ def build_training_table(
     return df
 
 
+def compare_distributions(df: pd.DataFrame) -> list[dict]:
+    """Per-signal stats: continuous → mean/median/std; binary → positive rate.
+
+    Returns a list of dicts (one per signal) so the report writer can render
+    a single table without re-walking SIGNALS.
+    """
+    if df.empty:
+        return []
+    positives = df[df["label"] == 1]
+    negatives = df[df["label"] == 0]
+    out = []
+    for col, kind, _src in SIGNALS:
+        if kind == "continuous":
+            out.append({
+                "signal": col,
+                "kind": "continuous",
+                "n_positive": len(positives),
+                "n_negative": len(negatives),
+                "positive_mean":   round(float(positives[col].mean()), 4) if len(positives) else None,
+                "negative_mean":   round(float(negatives[col].mean()), 4) if len(negatives) else None,
+                "positive_median": round(float(positives[col].median()), 4) if len(positives) else None,
+                "negative_median": round(float(negatives[col].median()), 4) if len(negatives) else None,
+                "positive_std":    round(float(positives[col].std()), 4) if len(positives) > 1 else None,
+                "negative_std":    round(float(negatives[col].std()), 4) if len(negatives) > 1 else None,
+            })
+        else:  # binary
+            out.append({
+                "signal": col,
+                "kind": "binary",
+                "n_positive": len(positives),
+                "n_negative": len(negatives),
+                "positive_rate": round(float(positives[col].mean()), 4) if len(positives) else None,
+                "negative_rate": round(float(negatives[col].mean()), 4) if len(negatives) else None,
+            })
+    return out
+
+
 def analyze(
     db_path: Path,
     geo: GeographyConfig,

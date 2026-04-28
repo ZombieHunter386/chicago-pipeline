@@ -225,3 +225,34 @@ def test_build_training_table_imputes_nulls(tmp_path):
     rates = df.attrs["imputation_rates"]
     assert rates["lot_size_sf"]["pct"] == round(100 / 3, 1)  # 1 of 3 imputed
     assert rates["is_absentee"]["pct"] == round(200 / 3, 1)  # 2 of 3 imputed
+
+
+def test_compare_distributions_continuous_and_binary(tmp_path):
+    parcels = [
+        _parcel_row(f"142100100{i:02d}0000",
+                    lot_size_sf=4000.0 + i * 1000.0,
+                    is_absentee=(1 if i % 2 == 0 else 0))
+        for i in range(10)
+    ]
+    db_path = _build_analyze_db(tmp_path, parcels)
+    positive_pins = {parcels[0]["pin"]: 2018, parcels[1]["pin"]: 2019}
+    df = analyze.build_training_table(db_path, positive_pins)
+    stats = analyze.compare_distributions(df)
+    by_signal = {s["signal"]: s for s in stats}
+
+    lot = by_signal["lot_size_sf"]
+    assert lot["kind"] == "continuous"
+    assert lot["n_positive"] == 2
+    assert lot["n_negative"] == 8
+    # Positives are the first two rows (4000, 5000) → mean 4500
+    assert lot["positive_mean"] == 4500.0
+    # Negatives are 5000–13000 step 1000 → mean 9000.0  (NOTE: pin 0 lot=4000 IS positive,
+    # pin 1 lot=5000 IS positive — negatives are 6000..13000 → mean 9500)
+    assert lot["negative_mean"] == 9500.0
+
+    abs_ = by_signal["is_absentee"]
+    assert abs_["kind"] == "binary"
+    # Positives: pin 0 (i=0, abs=1), pin 1 (i=1, abs=0) → rate 0.5
+    assert abs_["positive_rate"] == 0.5
+    # Negatives: i in 2..9 → 4 absentee (even i: 2,4,6,8), 4 not → 0.5
+    assert abs_["negative_rate"] == 0.5
