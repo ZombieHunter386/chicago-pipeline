@@ -557,3 +557,32 @@ def analyze(
         weights=weights,
         version=version,
     )
+
+
+def _cli(argv: list[str] | None = None) -> int:
+    import argparse
+    from pipeline.config import get_geography
+
+    p = argparse.ArgumentParser(prog="pipeline.analyze",
+                                description="Derive initial scoring weights from permit history.")
+    p.add_argument("--db", required=True, type=Path,
+                   help="Path to the SQLite DB (e.g. data/full.db).")
+    p.add_argument("--config-dir", required=True, type=Path,
+                   help="Directory containing geography.yaml.")
+    p.add_argument("--scoring-yaml", required=True, type=Path,
+                   help="Output path for config/scoring.yaml.")
+    p.add_argument("--report-md", required=True, type=Path,
+                   help="Output path for the markdown analysis report.")
+    args = p.parse_args(argv)
+
+    geo = get_geography(args.config_dir)
+    analyze(db_path=args.db, geo=geo,
+            scoring_yaml_path=args.scoring_yaml,
+            report_md_path=args.report_md)
+    print(f"Wrote {args.scoring_yaml}")
+    print(f"Wrote {args.report_md}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_cli())

@@ -508,3 +508,51 @@ def test_analyze_end_to_end_writes_yaml_and_report(tmp_path):
     assert "Test Geography" in body
     assert "Initial Scoring Weights" in body
     assert "Caveats" in body
+
+
+import subprocess
+import sys
+
+
+def test_cli_runs_analyze_against_synthetic_db(tmp_path):
+    parcels = [_parcel_row(f"14210010{i:03d}0000",
+                            lot_size_sf=4000.0 + i * 500,
+                            address=f"{100+i} W FAKE ST",
+                            lat=41.93 + i*0.0001, lng=-87.65 + i*0.0001)
+               for i in range(8)]
+    permits = [{"permit_number": "p1",
+                "permit_type": "PERMIT - NEW CONSTRUCTION",
+                "issue_date": "2019-01-01",
+                "street_number": "100", "street_direction": "W",
+                "street_name": "FAKE ST",
+                "latitude": 41.93, "longitude": -87.65}]
+    db_path = _build_analyze_db(tmp_path, parcels, permits)
+    # Minimal config dir with just geography.yaml
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "geography.yaml").write_text("""
+name: Test
+polygon:
+  - [41.92, -87.69]
+  - [41.92, -87.62]
+  - [41.95, -87.62]
+  - [41.95, -87.69]
+bbox:
+  min_lat: 41.92
+  max_lat: 41.95
+  min_lng: -87.69
+  max_lng: -87.62
+""".strip())
+    scoring = tmp_path / "scoring.yaml"
+    report = tmp_path / "report.md"
+
+    result = subprocess.run([
+        sys.executable, "-m", "pipeline.analyze",
+        "--db", str(db_path),
+        "--config-dir", str(config_dir),
+        "--scoring-yaml", str(scoring),
+        "--report-md", str(report),
+    ], capture_output=True, text=True, cwd=str(Path(__file__).resolve().parent.parent))
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    assert scoring.exists()
+    assert report.exists()
