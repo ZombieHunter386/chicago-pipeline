@@ -387,3 +387,43 @@ def test_cli_runs_score_against_synthetic_db(tmp_path):
     finally:
         conn.close()
     assert version == "1.0.0-cli-test"
+
+
+def test_score_parcels_skips_individual_condo_units(tmp_path):
+    """Individual condo units (is_condo_unit=1) must NOT receive a score —
+    they were dropped from training and are not redevelopment opportunities.
+    Building reps (is_condo_building=1) MUST receive a score."""
+    parcels = [
+        {"pin": "REGULAR", "lot_size_sf": 5000.0, "is_condo_unit": 0,
+         "is_condo_building": 0},
+        {"pin": "BUILDING_REP", "lot_size_sf": 40000.0, "is_condo_unit": 0,
+         "is_condo_building": 1},
+        {"pin": "UNIT_1", "lot_size_sf": 40000.0, "is_condo_unit": 1,
+         "is_condo_building": 0},
+        {"pin": "UNIT_2", "lot_size_sf": 40000.0, "is_condo_unit": 1,
+         "is_condo_building": 0},
+    ]
+    db_path = _build_score_db(tmp_path, parcels)
+    cfg = score.ScoringConfig(version="1.0.0-test", top_n=20, signals=[
+        score.SignalConfig(signal="lot_size_sf", kind="continuous",
+                           weight=1.0, direction="positive",
+                           normalization_min=0.0, normalization_max=10000.0,
+                           insignificant=False),
+    ])
+    n = score.score_parcels(db_path, cfg)
+    # Only the regular parcel and the building rep are scored — 2, not 4.
+    assert n == 2
+
+    from pipeline.db import get_connection
+    conn = get_connection(db_path)
+    try:
+        rows = {r["pin"]: r["score"] for r in conn.execute(
+            "SELECT pin, score FROM parcels"
+        ).fetchall()}
+    finally:
+        conn.close()
+
+    assert rows["REGULAR"] is not None
+    assert rows["BUILDING_REP"] is not None
+    assert rows["UNIT_1"] is None
+    assert rows["UNIT_2"] is None

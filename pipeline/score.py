@@ -130,7 +130,8 @@ def score_parcels(db_path: Path, scoring_config: ScoringConfig) -> int:
         return 0
     feature_cols = [s.signal for s in scoring_config.signals]
     select_cols = ["pin"] + feature_cols
-    select_sql = "SELECT " + ", ".join(select_cols) + " FROM parcels"
+    select_sql = ("SELECT " + ", ".join(select_cols) + " FROM parcels "
+                  "WHERE COALESCE(is_condo_unit, 0) = 0")
 
     conn = get_connection(db_path)
     try:
