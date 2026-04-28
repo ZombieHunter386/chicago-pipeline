@@ -13,6 +13,8 @@ from pathlib import Path
 
 import yaml
 
+from pipeline.db import get_connection
+
 
 @dataclass(frozen=True)
 class SignalConfig:
@@ -119,8 +121,37 @@ def score_parcel(parcel_row: dict, scoring_config: ScoringConfig) -> float:
 
 
 def score_parcels(db_path: Path, scoring_config: ScoringConfig) -> int:
-    """Filled in by Task 5."""
-    raise NotImplementedError("Implemented in Task 5")
+    """Score every parcel in the DB; UPDATE score + score_version per row.
+
+    Reads only the columns the config references plus `pin`. Always overwrites
+    existing scores. Returns the count of rows updated.
+    """
+    if not scoring_config.signals:
+        return 0
+    feature_cols = [s.signal for s in scoring_config.signals]
+    select_cols = ["pin"] + feature_cols
+    select_sql = "SELECT " + ", ".join(select_cols) + " FROM parcels"
+
+    conn = get_connection(db_path)
+    try:
+        rows = [dict(r) for r in conn.execute(select_sql).fetchall()]
+        if not rows:
+            return 0
+        updates = [
+            {"pin": r["pin"],
+             "score": score_parcel(r, scoring_config),
+             "score_version": scoring_config.version}
+            for r in rows
+        ]
+        conn.executemany(
+            "UPDATE parcels SET score = :score, score_version = :score_version "
+            "WHERE pin = :pin",
+            updates,
+        )
+        conn.commit()
+        return len(updates)
+    finally:
+        conn.close()
 
 
 def score(db_path: Path, scoring_yaml_path: Path) -> None:

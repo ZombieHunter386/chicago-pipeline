@@ -1,8 +1,11 @@
 """Tests for pipeline/score.py — applies weights from config/scoring.yaml
 to the parcels table to produce a 0-100 score per parcel."""
+from datetime import datetime, UTC
+
 import yaml
 
 from pipeline import score
+from pipeline.db import init_db, upsert_rows
 
 
 def test_module_exposes_expected_public_api():
@@ -230,3 +233,92 @@ def test_score_parcel_clamps_to_zero_to_hundred():
     ])
     assert score.score_parcel({"x": -5000}, cfg) == 0.0
     assert score.score_parcel({"x": 5000}, cfg) == 100.0
+
+
+def _build_score_db(tmp_path, parcels):
+    db_path = tmp_path / "score.db"
+    init_db(db_path)
+    now = datetime.now(UTC).isoformat(timespec="seconds")
+    upsert_rows(db_path, "parcels",
+                [{**p, "last_fetched_date": now} for p in parcels],
+                key_columns=["pin"])
+    return db_path
+
+
+def test_score_parcels_updates_score_and_version(tmp_path):
+    parcels = [
+        {"pin": "14210010010000", "lot_size_sf": 5000.0, "is_llc": 1},
+        {"pin": "14210010020000", "lot_size_sf": 9000.0, "is_llc": 0},
+    ]
+    db_path = _build_score_db(tmp_path, parcels)
+    cfg = _config([
+        score.SignalConfig(signal="lot_size_sf", kind="continuous", weight=0.5,
+                           direction="positive",
+                           normalization_min=0.0, normalization_max=10000.0,
+                           insignificant=False),
+        score.SignalConfig(signal="is_llc", kind="binary", weight=0.5,
+                           direction="positive",
+                           normalization_min=0.0, normalization_max=1.0,
+                           insignificant=False),
+    ])
+    cfg = score.ScoringConfig(version="1.0.0-test", top_n=20, signals=cfg.signals)
+    n = score.score_parcels(db_path, cfg)
+    assert n == 2
+
+    from pipeline.db import get_connection
+    conn = get_connection(db_path)
+    try:
+        rows = {r["pin"]: dict(r) for r in conn.execute(
+            "SELECT pin, score, score_version FROM parcels"
+        ).fetchall()}
+    finally:
+        conn.close()
+
+    # Parcel 1: lot=0.5*0.5 + is_llc=1.0*0.5 = 0.75 → 75
+    assert rows["14210010010000"]["score"] == 75.0
+    assert rows["14210010010000"]["score_version"] == "1.0.0-test"
+    # Parcel 2: lot=0.9*0.5 + is_llc=0.0*0.5 = 0.45 → 45
+    assert rows["14210010020000"]["score"] == 45.0
+    assert rows["14210010020000"]["score_version"] == "1.0.0-test"
+
+
+def test_score_parcels_is_idempotent(tmp_path):
+    """Running score_parcels twice with the same DB + config produces identical
+    score values — Score is deterministic, no per-run randomness."""
+    parcels = [{"pin": "14210010010000", "lot_size_sf": 5000.0, "is_llc": 1}]
+    db_path = _build_score_db(tmp_path, parcels)
+    cfg = score.ScoringConfig(
+        version="1.0.0-test", top_n=20,
+        signals=[score.SignalConfig(signal="lot_size_sf", kind="continuous",
+                                    weight=1.0, direction="positive",
+                                    normalization_min=0.0, normalization_max=10000.0,
+                                    insignificant=False)],
+    )
+    score.score_parcels(db_path, cfg)
+    from pipeline.db import get_connection
+    conn = get_connection(db_path)
+    try:
+        first = conn.execute(
+            "SELECT score FROM parcels WHERE pin='14210010010000'"
+        ).fetchone()["score"]
+    finally:
+        conn.close()
+
+    score.score_parcels(db_path, cfg)
+    conn = get_connection(db_path)
+    try:
+        second = conn.execute(
+            "SELECT score FROM parcels WHERE pin='14210010010000'"
+        ).fetchone()["score"]
+    finally:
+        conn.close()
+
+    assert first == second
+
+
+def test_score_parcels_handles_empty_db(tmp_path):
+    """No parcels → returns 0, no-op."""
+    db_path = tmp_path / "empty.db"
+    init_db(db_path)
+    cfg = score.ScoringConfig(version="1.0.0-test", top_n=20, signals=[])
+    assert score.score_parcels(db_path, cfg) == 0
