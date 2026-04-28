@@ -93,8 +93,29 @@ def normalize_signal(raw_value: float | int | None,
 
 
 def score_parcel(parcel_row: dict, scoring_config: ScoringConfig) -> float:
-    """Filled in by Task 4."""
-    raise NotImplementedError("Implemented in Task 4")
+    """Compute a 0-100 score for a single parcel.
+
+    For each signal in YAML order:
+      - normalize the parcel's raw value to [0, 1]
+      - flip if direction is negative: contribution = (1 - normalized) * weight
+      - else:                          contribution = normalized * weight
+      - add to running total
+
+    Multiply by 100 to scale into [0, 100]. Significant weights sum to 1.0
+    so the score is bounded to that range.
+
+    Insignificant signals have weight=0 — they contribute 0 by arithmetic.
+    """
+    total = 0.0
+    for sig in scoring_config.signals:
+        raw = parcel_row.get(sig.signal)
+        normalized = normalize_signal(raw, sig)
+        if sig.direction == "negative":
+            contribution = (1.0 - normalized) * sig.weight
+        else:
+            contribution = normalized * sig.weight
+        total += contribution
+    return round(total * 100, 4)
 
 
 def score_parcels(db_path: Path, scoring_config: ScoringConfig) -> int:
