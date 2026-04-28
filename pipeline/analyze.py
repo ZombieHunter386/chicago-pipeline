@@ -317,6 +317,42 @@ def fit_logistic_regression(
     return results
 
 
+def derive_weights(regression_results: list[dict]) -> list[dict]:
+    """Convert per-signal coefficients into YAML-ready scoring entries.
+
+    Significant signals: weight = |coef| / sum(|coef| over significant signals).
+    Insignificant signals: weight = 0, insignificant = True.
+
+    Direction carries the sign so the Score step knows whether higher raw
+    values push the score up or down.
+    """
+    sig_total = sum(abs(r["coef"]) for r in regression_results if r["significant"])
+    out: list[dict] = []
+    for r in regression_results:
+        if not r["significant"] or sig_total == 0:
+            weight = 0.0
+            insig = True
+        else:
+            weight = round(abs(r["coef"]) / sig_total, 4)
+            insig = False
+        out.append({
+            "signal": r["signal"],
+            "kind": r["kind"],
+            "weight": weight,
+            "direction": "positive" if r["coef"] >= 0 else "negative",
+            "normalization": {
+                "min": r["normalization_min"],
+                "max": r["normalization_max"],
+            },
+            "insignificant": insig,
+            # Carry-through for the report
+            "coef": r["coef"],
+            "ci_low": r["ci_low"],
+            "ci_high": r["ci_high"],
+        })
+    return out
+
+
 def analyze(
     db_path: Path,
     geo: GeographyConfig,

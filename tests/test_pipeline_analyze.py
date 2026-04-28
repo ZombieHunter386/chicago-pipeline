@@ -312,3 +312,47 @@ def test_fit_logistic_regression_handles_zero_positives():
     for r in results:
         assert r["coef"] == 0.0
         assert r["significant"] is False
+
+
+def test_derive_weights_normalizes_significant_only():
+    results = [
+        # Significant positive, large coef
+        {"signal": "lot_size_sf", "kind": "continuous",
+         "coef": 0.8, "ci_low": 0.5, "ci_high": 1.1, "significant": True,
+         "normalization_min": 1500.0, "normalization_max": 12000.0},
+        # Significant negative
+        {"signal": "cta_distance_ft", "kind": "continuous",
+         "coef": -0.4, "ci_low": -0.7, "ci_high": -0.1, "significant": True,
+         "normalization_min": 200.0, "normalization_max": 5000.0},
+        # Insignificant — gets weight 0
+        {"signal": "is_llc", "kind": "binary",
+         "coef": 0.05, "ci_low": -0.2, "ci_high": 0.3, "significant": False,
+         "normalization_min": 0.0, "normalization_max": 1.0},
+    ]
+    weights = analyze.derive_weights(results)
+    by_signal = {w["signal"]: w for w in weights}
+
+    # Lot size has 2× the magnitude of cta_distance → 0.8 / 1.2 ≈ 0.667
+    assert by_signal["lot_size_sf"]["weight"] == round(0.8 / 1.2, 4)
+    assert by_signal["lot_size_sf"]["direction"] == "positive"
+
+    assert by_signal["cta_distance_ft"]["weight"] == round(0.4 / 1.2, 4)
+    assert by_signal["cta_distance_ft"]["direction"] == "negative"
+
+    assert by_signal["is_llc"]["weight"] == 0.0
+    assert by_signal["is_llc"]["insignificant"] is True
+
+    # Significant weights must sum to 1.0 (modulo rounding).
+    sig_sum = sum(w["weight"] for w in weights if not w["insignificant"])
+    assert abs(sig_sum - 1.0) < 1e-3
+
+
+def test_derive_weights_all_insignificant_returns_zero_weights():
+    results = [
+        {"signal": "lot_size_sf", "kind": "continuous",
+         "coef": 0.05, "ci_low": -0.1, "ci_high": 0.2, "significant": False,
+         "normalization_min": 0.0, "normalization_max": 1.0},
+    ]
+    weights = analyze.derive_weights(results)
+    assert weights[0]["weight"] == 0.0
+    assert weights[0]["insignificant"] is True
