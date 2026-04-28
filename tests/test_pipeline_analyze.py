@@ -3,6 +3,7 @@ initial scoring weights from permit history."""
 from pathlib import Path
 from datetime import datetime, UTC
 
+import numpy as np
 import pandas as pd
 
 from pipeline import analyze
@@ -256,3 +257,58 @@ def test_compare_distributions_continuous_and_binary(tmp_path):
     assert abs_["positive_rate"] == 0.5
     # Negatives: i in 2..9 → 4 absentee (even i: 2,4,6,8), 4 not → 0.5
     assert abs_["negative_rate"] == 0.5
+
+
+def _build_separable_training_df(n_pos=40, n_neg=160, seed=0):
+    """A synthetic dataframe where lot_size_sf strongly predicts label,
+    is_llc weakly predicts, and cta_distance_ft is pure noise. Used to verify
+    the regression actually picks out signal vs. noise."""
+    rng = np.random.default_rng(seed)
+    cols = [s[0] for s in analyze.SIGNALS]
+    rows = []
+    for label in [1] * n_pos + [0] * n_neg:
+        row = {"pin": f"PIN{len(rows):05d}", "label": label}
+        for col, kind, _ in analyze.SIGNALS:
+            if col == "lot_size_sf":
+                row[col] = rng.normal(8000 if label else 4000, 500)
+            elif col == "is_llc":
+                row[col] = int(rng.random() < (0.6 if label else 0.4))
+            elif kind == "continuous":
+                row[col] = rng.normal(0, 1)  # noise
+            else:
+                row[col] = int(rng.random() < 0.5)  # noise
+        rows.append(row)
+    df = pd.DataFrame(rows)[["pin", "label"] + cols]
+    df.attrs["imputation_rates"] = {}
+    return df
+
+
+def test_fit_logistic_regression_picks_real_signal_over_noise():
+    df = _build_separable_training_df()
+    results = analyze.fit_logistic_regression(df, n_bootstrap=100, random_state=0)
+    by_signal = {r["signal"]: r for r in results}
+
+    # lot_size_sf is the dominant predictor and must be significant with a
+    # positive coefficient.
+    assert by_signal["lot_size_sf"]["significant"] is True
+    assert by_signal["lot_size_sf"]["coef"] > 0
+
+    # Pure-noise continuous columns must NOT be significant.
+    assert by_signal["cta_distance_ft"]["significant"] is False
+
+    # Normalization fields must be set per-kind.
+    assert by_signal["lot_size_sf"]["normalization_min"] is not None
+    assert by_signal["lot_size_sf"]["normalization_max"] is not None
+    assert by_signal["is_llc"]["normalization_min"] == 0
+    assert by_signal["is_llc"]["normalization_max"] == 1
+
+
+def test_fit_logistic_regression_handles_zero_positives():
+    df = _build_separable_training_df(n_pos=0, n_neg=20)
+    results = analyze.fit_logistic_regression(df, n_bootstrap=10, random_state=0)
+    # No positives → no model can be fit. Return one row per signal with
+    # coef=0, significant=False so downstream code doesn't branch.
+    assert len(results) == len(analyze.SIGNALS)
+    for r in results:
+        assert r["coef"] == 0.0
+        assert r["significant"] is False

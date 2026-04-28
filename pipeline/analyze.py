@@ -8,7 +8,9 @@ emits config/scoring.yaml + a markdown analysis report.
 from __future__ import annotations
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+from sklearn.linear_model import LogisticRegression
 
 from pipeline.config import GeographyConfig
 from pipeline.db import get_connection
@@ -227,6 +229,92 @@ def compare_distributions(df: pd.DataFrame) -> list[dict]:
                 "negative_rate": round(float(negatives[col].mean()), 4) if len(negatives) else None,
             })
     return out
+
+
+def _zscore_continuous(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, tuple[float, float]]]:
+    """Return a copy of df with continuous SIGNALS columns z-scored, plus the
+    (mean, std) used for each column so the same transform can be re-applied
+    to fresh data later if we ever want to."""
+    out = df.copy()
+    stats: dict[str, tuple[float, float]] = {}
+    for col, kind, _ in SIGNALS:
+        if kind != "continuous":
+            continue
+        mu = float(out[col].mean())
+        sigma = float(out[col].std()) or 1.0  # avoid div-by-zero if column is constant
+        out[col] = (out[col] - mu) / sigma
+        stats[col] = (mu, sigma)
+    return out, stats
+
+
+def fit_logistic_regression(
+    df: pd.DataFrame,
+    *,
+    n_bootstrap: int = 200,
+    random_state: int = 0,
+) -> list[dict]:
+    """Fit a logistic regression on (features, label) and return one row per
+    signal with coefficient, 95% bootstrap CI, significance flag, and the
+    normalization range (5th–95th percentile for continuous, (0, 1) for binary)
+    that the Score step uses to clip + rescale.
+
+    Returns a stable order matching SIGNALS so callers can `dict`-zip if needed.
+    """
+    feature_cols = [s[0] for s in SIGNALS]
+    if df.empty or df["label"].sum() == 0 or (df["label"] == 0).sum() == 0:
+        # Can't fit a classifier with 0 positives or 0 negatives.
+        return [
+            {"signal": col, "kind": kind,
+             "coef": 0.0, "ci_low": 0.0, "ci_high": 0.0, "significant": False,
+             "normalization_min": 0.0 if kind == "binary" else None,
+             "normalization_max": 1.0 if kind == "binary" else None}
+            for col, kind, _ in SIGNALS
+        ]
+
+    z_df, _stats = _zscore_continuous(df)
+    X = z_df[feature_cols].to_numpy(dtype=float)
+    y = z_df["label"].to_numpy(dtype=int)
+
+    base = LogisticRegression(class_weight="balanced", max_iter=1000, solver="liblinear")
+    base.fit(X, y)
+    base_coefs = base.coef_[0]  # shape (n_features,)
+
+    rng = np.random.default_rng(random_state)
+    n = len(z_df)
+    boot = np.zeros((n_bootstrap, len(feature_cols)))
+    for b in range(n_bootstrap):
+        idx = rng.integers(0, n, size=n)
+        Xb, yb = X[idx], y[idx]
+        # If the bootstrap sample has only one class, skip that iteration.
+        if len(np.unique(yb)) < 2:
+            boot[b] = base_coefs
+            continue
+        m = LogisticRegression(class_weight="balanced", max_iter=1000, solver="liblinear")
+        m.fit(Xb, yb)
+        boot[b] = m.coef_[0]
+
+    ci_low = np.percentile(boot, 2.5, axis=0)
+    ci_high = np.percentile(boot, 97.5, axis=0)
+
+    results = []
+    for j, (col, kind, _) in enumerate(SIGNALS):
+        if kind == "continuous":
+            n_min = float(np.percentile(df[col].dropna(), 5))
+            n_max = float(np.percentile(df[col].dropna(), 95))
+        else:
+            n_min, n_max = 0.0, 1.0
+        results.append({
+            "signal": col,
+            "kind": kind,
+            "coef": float(base_coefs[j]),
+            "ci_low": float(ci_low[j]),
+            "ci_high": float(ci_high[j]),
+            # 95% CI doesn't cross 0 → significant.
+            "significant": bool(ci_low[j] > 0 or ci_high[j] < 0),
+            "normalization_min": n_min,
+            "normalization_max": n_max,
+        })
+    return results
 
 
 def analyze(
