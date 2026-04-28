@@ -11,6 +11,7 @@ from webapp.parcel_query import (
     ALLOWED_FILTER_COLUMNS,
     build_count_query,
     build_parcel_query,
+    _build_where,
 )
 
 
@@ -161,6 +162,117 @@ def register(app: Flask) -> None:
 
         return jsonify({"type": "FeatureCollection", "features": features})
 
+    @app.get("/api/consolidation-groups")
+    def api_consolidation_groups():
+        """List consolidation groups with summary fields.
+
+        Respects the same filter query string as /api/parcels — a group
+        appears in the result only if at least one of its member parcels
+        matches the filter (so toggling 'Absentee' or typing 'lincoln'
+        in address-search prunes the group list correspondingly).
+
+        Two extra knobs control list noise:
+
+          ?min_combined_lot_size_sf=5000   (default 5000, set 0 to disable)
+              Drops tiny groups whose combined lot is below the threshold.
+              Most consolidate.py groupings are condo-unit clusters in a
+              single building; their combined lot is the building's lot
+              counted N times and they aren't usually consolidation plays.
+
+          ?multi_pin10_only=true            (default true, set false to disable)
+              Drops groups whose member PINs all share the same pin10 (i.e.
+              all units of one building). True consolidation opportunities
+              span multiple buildings/lots, which means multiple pin10s.
+        """
+        filters = _parse_filters(request.args)
+        stage = request.args.get("stage") or None
+        try:
+            min_lot = float(request.args.get("min_combined_lot_size_sf", 5000))
+        except ValueError:
+            min_lot = 5000.0
+        multi_pin10_only = request.args.get(
+            "multi_pin10_only", "true"
+        ).lower() in {"true", "1"}
+
+        try:
+            where_clauses, where_params = _build_where(
+                filters, stage, include_condo_units=True,
+            )
+        except ValueError as e:
+            abort(400, str(e))
+        where_clauses.append("consolidation_group_id IS NOT NULL")
+        match_sql = (
+            "SELECT DISTINCT consolidation_group_id FROM parcels WHERE "
+            + " AND ".join(where_clauses)
+        )
+
+        having_clauses = []
+        if min_lot > 0:
+            having_clauses.append(f"COALESCE(g.combined_lot_size_sf, 0) >= {min_lot}")
+        if multi_pin10_only:
+            having_clauses.append("COUNT(DISTINCT p.pin10) > 1")
+        having_sql = (" HAVING " + " AND ".join(having_clauses)) if having_clauses else ""
+
+        with closing(_conn()) as conn:
+            rows = conn.execute(f"""
+                SELECT
+                    g.group_id, g.pins, g.owner_name, g.detected_date,
+                    g.combined_lot_size_sf, g.combined_building_sf,
+                    AVG(p.lat) AS centroid_lat,
+                    AVG(p.lng) AS centroid_lng,
+                    COUNT(p.pin) AS parcel_count,
+                    COUNT(DISTINCT p.pin10) AS distinct_pin10_count,
+                    SUM(p.estimated_annual_tax) AS sum_estimated_annual_tax,
+                    SUM(p.assessed_total) AS sum_assessed_total,
+                    MIN(p.year_built) AS oldest_year_built,
+                    MAX(p.hold_duration_years) AS longest_hold_years
+                FROM consolidation_groups g
+                LEFT JOIN parcels p ON p.consolidation_group_id = g.group_id
+                WHERE g.group_id IN ({match_sql})
+                GROUP BY g.group_id
+                {having_sql}
+                ORDER BY g.combined_lot_size_sf DESC NULLS LAST
+            """, where_params).fetchall()
+        return jsonify({"groups": [dict(r) for r in rows]})
+
+    @app.get("/api/consolidation-groups/<int:group_id>")
+    def api_consolidation_group_detail(group_id: int):
+        """Full detail for one group: aggregates + member parcel rows."""
+        with closing(_conn()) as conn:
+            grp = conn.execute("""
+                SELECT
+                    g.group_id, g.pins, g.owner_name, g.detected_date,
+                    g.combined_lot_size_sf, g.combined_building_sf,
+                    AVG(p.lat) AS centroid_lat,
+                    AVG(p.lng) AS centroid_lng,
+                    COUNT(p.pin) AS parcel_count,
+                    SUM(p.estimated_annual_tax) AS sum_estimated_annual_tax,
+                    SUM(p.assessed_total) AS sum_assessed_total,
+                    MIN(p.year_built) AS oldest_year_built,
+                    MAX(p.hold_duration_years) AS longest_hold_years
+                FROM consolidation_groups g
+                LEFT JOIN parcels p ON p.consolidation_group_id = g.group_id
+                WHERE g.group_id = ?
+                GROUP BY g.group_id
+            """, (group_id,)).fetchone()
+            if grp is None:
+                abort(404)
+            members = [dict(r) for r in conn.execute("""
+                SELECT pin, address, lat, lng, property_class, lot_size_sf,
+                       building_sf, year_built, assessed_total,
+                       estimated_annual_tax, hold_duration_years,
+                       zone_class, max_far, built_far, far_gap, far_gap_delta,
+                       allows_multifamily_by_right, min_lot_area_per_unit,
+                       max_units_allowed
+                FROM parcels
+                WHERE consolidation_group_id = ?
+                ORDER BY pin
+            """, (group_id,)).fetchall()]
+        body = dict(grp)
+        body["members"] = members
+        body["zoning_summary"] = _summarize_zoning(members, body)
+        return jsonify(body)
+
     @app.get("/_test_explode")
     def _test_explode():
         # Only available in test mode; production gets a normal 404.
@@ -231,6 +343,85 @@ def _map_category(row: dict) -> str:
     if row.get("consolidation_group_id") is not None:
         return "consolidated"
     return "other"
+
+
+def _summarize_zoning(members: list, group: dict) -> dict:
+    """Aggregate the zoning fields across member parcels of a consolidation
+    group. When all members share a zone, the result reads like a single
+    parcel; when they differ, we surface a per-zone breakdown plus a
+    'dominant zone' (most-common, ties broken by largest combined lot SF
+    in that zone) under which combined-development potential is computed."""
+    from collections import defaultdict
+
+    zone_buckets: dict = defaultdict(lambda: {
+        "parcel_count": 0,
+        "lot_sf": 0.0,
+        "max_far": None,
+        "min_lot_area_per_unit": None,
+        "allows_multifamily_by_right": None,
+    })
+    for m in members:
+        zc = m.get("zone_class") or "(unknown)"
+        b = zone_buckets[zc]
+        b["parcel_count"] += 1
+        b["lot_sf"] += m.get("lot_size_sf") or 0.0
+        # Per-zone constants: copy from any member with a non-null value.
+        for key in ("max_far", "min_lot_area_per_unit", "allows_multifamily_by_right"):
+            if b[key] is None and m.get(key) is not None:
+                b[key] = m[key]
+
+    breakdown = [
+        {"zone_class": zc, **vals} for zc, vals in zone_buckets.items()
+    ]
+    breakdown.sort(key=lambda r: (-r["parcel_count"], -r["lot_sf"]))
+
+    is_uniform = len([z for z in zone_buckets if z != "(unknown)"]) == 1
+    dominant = breakdown[0]["zone_class"] if breakdown else None
+    dominant_max_far = breakdown[0]["max_far"] if breakdown else None
+    dominant_min_lot_pu = breakdown[0]["min_lot_area_per_unit"] if breakdown else None
+
+    # Combined-lot development potential under the dominant zone.
+    combined_lot = group.get("combined_lot_size_sf") or 0.0
+    combined_bldg = group.get("combined_building_sf") or 0.0
+    combined_built_far = (
+        round(combined_bldg / combined_lot, 4) if combined_lot > 0 and combined_bldg > 0 else None
+    )
+    combined_max_buildable_sf = (
+        round(combined_lot * dominant_max_far, 0) if combined_lot and dominant_max_far else None
+    )
+    combined_far_gap_delta = (
+        round(dominant_max_far - combined_built_far, 4)
+        if dominant_max_far is not None and combined_built_far is not None
+        else None
+    )
+    combined_max_units = (
+        int(combined_lot // dominant_min_lot_pu)
+        if combined_lot and dominant_min_lot_pu and dominant_min_lot_pu > 0
+        else None
+    )
+
+    # Multifamily-by-right: aggregate yes/no across members
+    yes = sum(1 for b in zone_buckets.values() if b["allows_multifamily_by_right"] == 1)
+    no = sum(1 for b in zone_buckets.values() if b["allows_multifamily_by_right"] == 0)
+    if yes > 0 and no == 0:
+        mf_status = "all"
+    elif no > 0 and yes == 0:
+        mf_status = "none"
+    elif yes > 0 and no > 0:
+        mf_status = "mixed"
+    else:
+        mf_status = "unknown"
+
+    return {
+        "is_uniform_zone": is_uniform,
+        "dominant_zone": dominant,
+        "breakdown": breakdown,
+        "combined_built_far": combined_built_far,
+        "combined_max_buildable_sf": combined_max_buildable_sf,
+        "combined_far_gap_delta": combined_far_gap_delta,
+        "combined_max_units_dominant_zone": combined_max_units,
+        "allows_multifamily_status": mf_status,
+    }
 
 
 def _google_maps_url(parcel: dict) -> str:

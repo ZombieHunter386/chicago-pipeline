@@ -58,6 +58,11 @@
   .parcel-item { padding: 12px 16px; border-bottom: 1px solid #21262d; cursor: pointer; transition: background 0.1s; }
   .parcel-item:hover { background: #1c2333; }
   .parcel-item.selected { background: #1f6feb1a; border-left: 3px solid #1f6feb; }
+  /* Consolidation-group rows live above the parcel rows; tinted purple
+     border so they read as a different entity type at a glance. */
+  .parcel-item-group { background: #2a1c3a14; border-left: 3px solid #a855f7; }
+  .parcel-item-group:hover { background: #2a1c3a44; }
+  .parcel-item-group.selected { background: #a855f72a; border-left: 3px solid #a855f7; }
   .parcel-item .address { font-size: 13px; font-weight: 600; color: #f0f6fc; margin-bottom: 4px; }
   .parcel-item .details { font-size: 11px; color: #8b949e; margin-bottom: 6px; }
   .parcel-item .tags { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }

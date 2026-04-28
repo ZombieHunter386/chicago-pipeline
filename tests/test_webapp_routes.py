@@ -248,3 +248,81 @@ def test_api_parcels_excludes_condo_units_by_default(pop_client, populated_db_pa
     r2 = pop_client.get("/api/parcels?limit=1000&include_condo_units=true")
     pins_inc = {p["pin"] for p in r2.get_json()["parcels"]}
     assert hidden_pin in pins_inc
+
+
+# ---------------------------------------------------------------------------
+# Consolidation-group endpoints
+# ---------------------------------------------------------------------------
+
+def test_api_consolidation_groups_default_filter_drops_single_pin10(pop_client):
+    """The default response filters out groups whose member PINs all share
+    one pin10 — i.e. condo-unit clusters in a single building. They aren't
+    real consolidation plays and they swamp the list otherwise."""
+    default = pop_client.get("/api/consolidation-groups").get_json()
+    unfiltered = pop_client.get(
+        "/api/consolidation-groups?min_combined_lot_size_sf=0&multi_pin10_only=false"
+    ).get_json()
+    assert "groups" in default and "groups" in unfiltered
+    # The unfiltered count should always be >= the default-filtered count.
+    assert len(unfiltered["groups"]) >= len(default["groups"])
+    # Every group in the default response has multiple distinct pin10s.
+    for g in default["groups"]:
+        assert g["distinct_pin10_count"] >= 2, g
+
+
+def test_api_consolidation_groups_min_combined_lot_size_filter(pop_client):
+    """The `min_combined_lot_size_sf` knob drops smaller groups."""
+    big = pop_client.get(
+        "/api/consolidation-groups?min_combined_lot_size_sf=100000&multi_pin10_only=false"
+    ).get_json()
+    none = pop_client.get(
+        "/api/consolidation-groups?min_combined_lot_size_sf=0&multi_pin10_only=false"
+    ).get_json()
+    assert len(big["groups"]) <= len(none["groups"])
+    for g in big["groups"]:
+        assert g["combined_lot_size_sf"] >= 100000, g
+
+
+def test_api_consolidation_groups_respects_parcel_filters(pop_client):
+    """Groups should appear only when at least one of their member parcels
+    matches the parcel-filter query string. Forcing `is_llc=true` should
+    not return more groups than the unfiltered call."""
+    all_groups = pop_client.get(
+        "/api/consolidation-groups?min_combined_lot_size_sf=0&multi_pin10_only=false"
+    ).get_json()
+    llc_only = pop_client.get(
+        "/api/consolidation-groups?is_llc=true&min_combined_lot_size_sf=0&multi_pin10_only=false"
+    ).get_json()
+    assert len(llc_only["groups"]) <= len(all_groups["groups"])
+
+
+def test_api_consolidation_group_detail_includes_zoning_summary(pop_client):
+    """Detail endpoint returns aggregates + member rows + zoning_summary
+    (the new field consumed by the right-panel Zoning section)."""
+    listed = pop_client.get(
+        "/api/consolidation-groups?min_combined_lot_size_sf=0&multi_pin10_only=false"
+    ).get_json()["groups"]
+    if not listed:
+        pytest.skip("smoke.db has no consolidation groups")
+    gid = listed[0]["group_id"]
+    body = pop_client.get(f"/api/consolidation-groups/{gid}").get_json()
+    assert "members" in body and isinstance(body["members"], list)
+    assert "zoning_summary" in body
+    z = body["zoning_summary"]
+    # Required top-level zoning_summary fields.
+    for key in (
+        "is_uniform_zone", "dominant_zone", "breakdown",
+        "combined_built_far", "combined_max_buildable_sf",
+        "combined_far_gap_delta", "combined_max_units_dominant_zone",
+        "allows_multifamily_status",
+    ):
+        assert key in z, key
+    # Breakdown rows have the expected shape.
+    for b in z["breakdown"]:
+        for k in ("zone_class", "parcel_count", "lot_sf", "max_far"):
+            assert k in b, k
+
+
+def test_api_consolidation_group_detail_404_for_unknown(pop_client):
+    resp = pop_client.get("/api/consolidation-groups/999999")
+    assert resp.status_code == 404

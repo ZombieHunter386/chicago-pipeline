@@ -96,8 +96,13 @@
       <h3>Layers</h3>
       <label class="layer-toggle"><input type="checkbox" checked data-layer="top"> <span class="layer-dot" style="background:#238636" aria-hidden="true"></span> Top-N scored</label>
       <label class="layer-toggle"><input type="checkbox" checked data-layer="consolidated"> <span class="layer-dot" style="background:#a855f7" aria-hidden="true"></span> Consolidated</label>
+      <label class="layer-toggle"><input type="checkbox" checked data-layer="group"> <span class="layer-dot" style="background:transparent; border:2px solid #a855f7;" aria-hidden="true"></span> Group markers</label>
       <label class="layer-toggle"><input type="checkbox" checked data-layer="outreach"> <span class="layer-dot" style="background:#58a6ff" aria-hidden="true"></span> Outreach sent</label>
       <label class="layer-toggle"><input type="checkbox" checked data-layer="other"> <span class="layer-dot" style="background:#f85149" aria-hidden="true"></span> All others</label>
+      <h3 style="margin-top:10px;">Overlays</h3>
+      <label class="layer-toggle"><input type="checkbox" data-layer="parcel_outlines"> <span class="layer-dot" style="background:transparent; border:1px solid #7dd3fc;" aria-hidden="true"></span> Parcel outlines</label>
+      <!-- Address labels (Stadia toner labels) auto-enable when Satellite is selected;
+           dark basemap already shows them via OSM, so no manual toggle needed. -->
     </div>
   </main>
 
@@ -113,6 +118,8 @@
   window.FEATURE_OUTREACH = {{ feature_outreach|tojson }};
 </script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- esri-leaflet powers the optional parcel-outlines overlay (Cook County GIS feature server) -->
+<script src="https://unpkg.com/esri-leaflet@3.0.12/dist/esri-leaflet.js"></script>
 <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
 <script src="{{ url_for('static', filename='js/filters.js') }}"></script>
 <script src="{{ url_for('static', filename='js/list.js') }}"></script>

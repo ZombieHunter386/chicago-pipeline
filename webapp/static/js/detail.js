@@ -4,12 +4,14 @@
   let reqId = 0;
 
   window.addEventListener('parcelselect', async (e) => {
-    const pin = e && e.detail ? e.detail.pin : null;
-
-    if (!pin) {
-      renderPlaceholder();
+    const detail = e && e.detail ? e.detail : null;
+    if (!detail) { renderPlaceholder(); return; }
+    if (detail.groupId != null) {
+      await loadGroupDetail(detail.groupId);
       return;
     }
+    const pin = detail.pin;
+    if (!pin) { renderPlaceholder(); return; }
 
     const myId = ++reqId;
     let resp, data;
@@ -81,6 +83,157 @@
     if (window.FEATURE_OUTREACH) {
       panel.appendChild(sectionOutreachStub());
     }
+  }
+
+  async function loadGroupDetail(groupId) {
+    const myId = ++reqId;
+    let resp, data;
+    try {
+      resp = await fetch(`/api/consolidation-groups/${encodeURIComponent(groupId)}`);
+    } catch (_) {
+      if (myId === reqId) renderError("Couldn't load consolidation group — try again.");
+      return;
+    }
+    if (myId !== reqId) return;
+    if (!resp.ok) {
+      renderError(resp.status === 404 ? 'Consolidation group not found.' : "Couldn't load group.");
+      return;
+    }
+    try { data = await resp.json(); }
+    catch (_) { if (myId === reqId) renderError("Couldn't load consolidation group."); return; }
+    if (myId !== reqId) return;
+    renderGroupView(data);
+  }
+
+  function renderGroupView(g) {
+    const panel = document.getElementById('detail-panel');
+    panel.innerHTML = '';
+
+    // Header section: aggregate stats + member list with click-through.
+    panel.appendChild(renderSection('Consolidation Group', [
+      ['Owner', g.owner_name],
+      ['Group ID', g.group_id],
+      ['Detected', g.detected_date],
+      ['Parcels in group', g.parcel_count],
+      ['Combined Lot', g.combined_lot_size_sf != null
+        ? `${Math.round(g.combined_lot_size_sf).toLocaleString()} SF` : null],
+      ['Combined Building', g.combined_building_sf != null
+        ? `${Math.round(g.combined_building_sf).toLocaleString()} SF` : null],
+      ['Combined Assessed', g.sum_assessed_total != null
+        ? `$${Math.round(g.sum_assessed_total).toLocaleString()}` : null],
+      ['Sum Annual Tax (est.)', g.sum_estimated_annual_tax != null
+        ? `$${Math.round(g.sum_estimated_annual_tax).toLocaleString()}` : null],
+      ['Oldest Building', g.oldest_year_built],
+      ['Longest Hold', g.longest_hold_years != null
+        ? `${Math.round(g.longest_hold_years)} years` : null],
+    ]));
+
+    if (g.zoning_summary) panel.appendChild(sectionGroupZoning(g));
+
+    // Member parcel list with click-through to the individual parcel view.
+    const members = g.members || [];
+    const sec = document.createElement('div');
+    sec.className = 'detail-section';
+    const h = document.createElement('h3');
+    h.textContent = `Member Parcels (${members.length})`;
+    sec.appendChild(h);
+    const ul = document.createElement('div');
+    ul.className = 'detail-grid';
+    ul.style.gridTemplateColumns = '1fr';
+    members.forEach(m => {
+      const row = document.createElement('div');
+      row.className = 'detail-item';
+      row.style.cursor = 'pointer';
+      const sub = [
+        m.lot_size_sf ? `${Math.round(m.lot_size_sf).toLocaleString()} SF lot` : null,
+        m.building_sf ? `${Math.round(m.building_sf).toLocaleString()} SF bldg` : null,
+        m.year_built ? `Built ${m.year_built}` : null,
+      ].filter(Boolean).join(' · ');
+      row.innerHTML = `
+        <div class="label" style="cursor:pointer;">${escapeHtml(m.address || m.pin)}</div>
+        <div class="value" style="font-size:11px; color:#8b949e;">${escapeHtml(sub || '—')}</div>
+      `;
+      row.addEventListener('click', () => {
+        window.dispatchEvent(new CustomEvent('parcelselect', { detail: { pin: m.pin } }));
+      });
+      ul.appendChild(row);
+    });
+    sec.appendChild(ul);
+    panel.appendChild(sec);
+  }
+
+  function sectionGroupZoning(g) {
+    const z = g.zoning_summary || {};
+    // Zone display: single value if all members share a zone, otherwise
+    // a "Various: <zone> (n) · <zone> (n)" string preserving counts.
+    let zoneDisplay;
+    if (z.is_uniform_zone) {
+      zoneDisplay = z.dominant_zone || '—';
+    } else {
+      const parts = (z.breakdown || []).map(
+        b => `${b.zone_class} (${b.parcel_count})`
+      );
+      zoneDisplay = parts.length ? `Various: ${parts.join(' · ')}` : '—';
+    }
+
+    // Multifamily-by-right summary
+    const mfMap = {
+      all: 'Yes — all members',
+      none: 'No — none of the members',
+      mixed: 'Mixed across members',
+      unknown: '—',
+    };
+
+    // FAR Gap (Δ) phrasing matches the per-parcel formatter for consistency.
+    let farGapDelta = null;
+    if (z.combined_far_gap_delta != null) {
+      const v = z.combined_far_gap_delta;
+      const sign = v > 0 ? '+' : '';
+      const tail = v >= 0 ? 'FAR available' : 'FAR over by-right';
+      farGapDelta = `${sign}${v.toFixed(2)} ${tail}`;
+    }
+
+    const dz = z.dominant_zone || '—';
+    const buildable = z.combined_max_buildable_sf != null
+      ? `${Math.round(z.combined_max_buildable_sf).toLocaleString()} SF`
+      : null;
+    const subtitleNote = z.is_uniform_zone
+      ? `All members share zone ${dz}.`
+      : `Combined development potential below assumes the dominant zone (${dz}) governs the consolidated lot. Where zones differ, the actual entitlement may require rezoning.`;
+
+    const pairs = [
+      ['Zone class', zoneDisplay],
+      ['Allows multifamily', mfMap[z.allows_multifamily_status] || '—'],
+      ['Built FAR (combined)', z.combined_built_far],
+      ['Max FAR (dominant zone)',
+        (z.breakdown && z.breakdown[0] && z.breakdown[0].max_far) || null],
+      ['FAR Gap (Δ)', farGapDelta],
+      ['Max buildable SF (combined)', buildable],
+      ['Max units (dominant zone)', z.combined_max_units_dominant_zone],
+    ];
+
+    // If zones differ, append a per-zone breakdown so the user sees where
+    // the constraints come from.
+    if (!z.is_uniform_zone && z.breakdown && z.breakdown.length > 1) {
+      z.breakdown.forEach(b => {
+        const lot = b.lot_sf
+          ? `${Math.round(b.lot_sf).toLocaleString()} SF lot`
+          : null;
+        const far = b.max_far != null ? `max FAR ${b.max_far}` : null;
+        const mlu = b.min_lot_area_per_unit != null
+          ? `min ${b.min_lot_area_per_unit} sf/unit` : null;
+        const detail = [b.parcel_count + ' parcels', lot, far, mlu]
+          .filter(Boolean).join(' · ');
+        pairs.push([`  ${b.zone_class}`, detail]);
+      });
+    }
+
+    const el = renderSection('Zoning (combined)', pairs);
+    const note = document.createElement('div');
+    note.style.cssText = 'font-size:11px; color:#8b949e; padding:6px 0 0; line-height:1.4;';
+    note.textContent = subtitleNote;
+    el.querySelector('.detail-grid').after(note);
+    return el;
   }
 
   function sectionConsolidationGroup(p) {

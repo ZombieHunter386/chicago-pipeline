@@ -6,31 +6,56 @@
     top: '#238636',
     consolidated: '#a855f7',
     outreach: '#58a6ff',
+    group: '#a855f7',                 // same hue as consolidated members
     other: '#f85149',
   };
 
+  // Each basemap is a list of tile layers stacked back-to-front. The
+  // satellite stack adds an Esri Reference overlay so street names show
+  // up over the imagery — without it, satellite is unlabeled.
   const BASEMAPS = {
-    dark: {
-      url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-      attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-      maxZoom: 19,
-    },
-    satellite: {
-      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-      attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
-      maxZoom: 19,
-    },
+    dark: [
+      {
+        url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+        attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+        maxZoom: 19,
+      },
+    ],
+    satellite: [
+      {
+        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+        maxZoom: 19,
+      },
+      {
+        // Esri reference overlay — transparent street labels and place names.
+        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+        attribution: 'Labels &copy; Esri',
+        maxZoom: 19,
+        opacity: 0.85,
+      },
+    ],
   };
+
+  // Optional overlay layers that the user toggles in the Layers panel.
+  // Loaded lazily on first toggle-on so we don't hammer external services
+  // when not requested.
+  let osmLabelsLayer = null;     // OSM tiles for building/unit numbers
+  let parcelLayer = null;        // Cook County parcel polygons (esri-leaflet)
 
   let map = null;
   let markerLayer = null;
-  let basemapLayer = null;
+  let groupLayer = null;          // separate layer group for consolidation-group pins
+  let basemapLayers = [];         // current basemap's tile-layer stack
   let markersByPin = {};
+  let markersByGroupId = {};
   let selectionRing = null;
   let selectedPin = null;
+  let selectedGroupId = null;
   let reqId = 0;
   const layerEnabled = {
     top: true, consolidated: true, outreach: true, other: true,
+    group: true, parcel_outlines: false,
   };
 
   let mapSortBy = '';
@@ -46,7 +71,10 @@
     loadMap();
   });
   window.addEventListener('parcelselect', (e) => {
-    if (e && e.detail && e.detail.pin != null) {
+    if (!e || !e.detail) return;
+    if (e.detail.groupId != null) {
+      highlightGroupSelection(e.detail.groupId);
+    } else if (e.detail.pin != null) {
       highlightSelection(e.detail.pin);
     }
   });
@@ -56,12 +84,17 @@
     setBasemap('dark');
     L.control.zoom({ position: 'bottomright' }).addTo(map);
     markerLayer = L.layerGroup().addTo(map);
+    groupLayer = L.layerGroup().addTo(map);
 
     document.querySelectorAll('.layer-toggle input[data-layer]').forEach(cb => {
       cb.addEventListener('change', (e) => {
         const layer = e.target.dataset.layer;
-        if (layer in layerEnabled) {
-          layerEnabled[layer] = e.target.checked;
+        if (!(layer in layerEnabled)) return;
+        layerEnabled[layer] = e.target.checked;
+        if (layer === 'parcel_outlines') {
+          const l = ensureParcelLayer();
+          if (l) e.target.checked ? l.addTo(map) : map.removeLayer(l);
+        } else {
           applyLayerVisibility();
         }
       });
@@ -75,27 +108,86 @@
   }
 
   function setBasemap(name) {
-    const cfg = BASEMAPS[name] || BASEMAPS.dark;
-    if (basemapLayer) map.removeLayer(basemapLayer);
-    basemapLayer = L.tileLayer(cfg.url, {
-      attribution: cfg.attribution,
-      maxZoom: cfg.maxZoom,
-    }).addTo(map);
-    basemapLayer.bringToBack();
+    const stack = BASEMAPS[name] || BASEMAPS.dark;
+    basemapLayers.forEach(l => map.removeLayer(l));
+    basemapLayers = stack.map(cfg => {
+      const opts = { attribution: cfg.attribution, maxZoom: cfg.maxZoom };
+      if (cfg.opacity != null) opts.opacity = cfg.opacity;
+      return L.tileLayer(cfg.url, opts).addTo(map);
+    });
+    basemapLayers.forEach(l => l.bringToBack());
+    // Auto-toggle the OSM/Stadia address-label overlay: dark basemap (CARTO)
+    // already labels streets and building numbers, so the overlay would
+    // double-render text. Satellite has no labels in the imagery itself,
+    // so we layer Stadia toner labels on top.
+    const addressLabels = ensureOsmLabelsLayer();
+    if (addressLabels) {
+      const want = (name === 'satellite');
+      const isOnMap = map.hasLayer(addressLabels);
+      if (want && !isOnMap) addressLabels.addTo(map);
+      else if (!want && isOnMap) map.removeLayer(addressLabels);
+    }
+  }
+
+  function ensureOsmLabelsLayer() {
+    if (osmLabelsLayer) return osmLabelsLayer;
+    // Stamen Toner Labels is a transparent label-only OSM tileset that
+    // shows building/street numbers at high zoom — ideal for overlaying
+    // on satellite imagery. Hosted free by Stadia Maps with attribution.
+    osmLabelsLayer = L.tileLayer(
+      'https://tiles.stadiamaps.com/tiles/stamen_toner_labels/{z}/{x}/{y}{r}.png',
+      {
+        attribution: '&copy; Stadia Maps &copy; Stamen Design &copy; OpenStreetMap',
+        maxZoom: 19,
+        opacity: 0.95,
+      }
+    );
+    return osmLabelsLayer;
+  }
+
+  function ensureParcelLayer() {
+    if (parcelLayer) return parcelLayer;
+    // Cook County's public ArcGIS feature server for 2025 parcels.
+    // esri-leaflet loads features dynamically per viewport so we don't
+    // need to pull all 1.8M county-wide parcels at once.
+    if (typeof L.esri === 'undefined' || !L.esri.featureLayer) {
+      console.warn('esri-leaflet not loaded — parcel outlines unavailable');
+      return null;
+    }
+    parcelLayer = L.esri.featureLayer({
+      url: 'https://gis.cookcountyil.gov/traditional/rest/services/parcelHistorical/MapServer/2025',
+      // Only fetch features starting at zoom 16 (~1 city block) — at lower
+      // zooms the feature count would be huge and the outlines would be
+      // visual noise anyway.
+      minZoom: 16,
+      style: () => ({
+        color: '#7dd3fc',     // light cyan, visible on both dark and satellite
+        weight: 1,
+        fillOpacity: 0,
+        opacity: 0.7,
+      }),
+      // Don't render labels or popups — outlines only, the parcel info
+      // comes from our own DB via the existing detail panel.
+      interactive: false,
+    });
+    return parcelLayer;
   }
 
   async function loadMap() {
     const myId = ++reqId;
     const qs = window.filterStateToQuery ? window.filterStateToQuery() : '';
     const sortQs = mapSortBy ? `&sort=${encodeURIComponent(mapSortBy)}&dir=${mapSortDir}` : '';
-    let geo;
+    let geo, groups;
     try {
-      const r = await fetch(`/api/map-data?${qs}${sortQs}`);
+      const [r, rg] = await Promise.all([
+        fetch(`/api/map-data?${qs}${sortQs}`),
+        fetch('/api/consolidation-groups'),
+      ]);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       geo = await r.json();
+      // Group fetch is best-effort — if it fails, we still render parcels.
+      groups = rg.ok ? await rg.json() : { groups: [] };
     } catch (err) {
-      // Bail on error: keep existing markers in place. List module
-      // already surfaces the user-facing error message; don't double up.
       console.error('map: failed to load /api/map-data', err);
       return;
     }
@@ -105,7 +197,40 @@
     if (!geo || !Array.isArray(geo.features)) return;
 
     markerLayer.clearLayers();
+    groupLayer.clearLayers();
     markersByPin = {};
+    markersByGroupId = {};
+
+    // Render group markers first so individual-parcel pins draw on top
+    // when they overlap (groups are reference markers; per-parcel pins
+    // are the click target for the underlying data).
+    (groups.groups || []).forEach(g => {
+      if (g.centroid_lat == null || g.centroid_lng == null) return;
+      // Distinct visual: ring (transparent fill, thick purple border) at
+      // double the radius of regular pins so it reads as "this is the
+      // group container" not a regular pin.
+      const m = L.circleMarker([g.centroid_lat, g.centroid_lng], {
+        radius: 14,
+        color: CATEGORY_COLORS.group,
+        fillColor: CATEGORY_COLORS.group,
+        fillOpacity: 0.15,
+        weight: 3,
+      });
+      m._category = 'group';
+      m._groupId = g.group_id;
+      m.bindTooltip(
+        escapeHtml(`Group · ${g.parcel_count} parcels · ${g.owner_name || ''}`),
+        { direction: 'top', offset: [0, -16] }
+      );
+      m.on('click', () => {
+        if (selectedGroupId === g.group_id) return;
+        window.dispatchEvent(new CustomEvent('parcelselect', {
+          detail: { groupId: g.group_id },
+        }));
+      });
+      markersByGroupId[g.group_id] = m;
+      groupLayer.addLayer(m);
+    });
 
     geo.features.forEach(f => {
       const coords = f && f.geometry && f.geometry.coordinates;
@@ -169,6 +294,10 @@
       const visible = !!layerEnabled[cat];
       m.setStyle({ opacity: visible ? 1 : 0, fillOpacity: visible ? 0.8 : 0 });
     });
+    groupLayer.eachLayer(m => {
+      const visible = !!layerEnabled.group;
+      m.setStyle({ opacity: visible ? 1 : 0, fillOpacity: visible ? 0.15 : 0 });
+    });
     syncSelectionRingVisibility();
   }
 
@@ -186,10 +315,23 @@
 
   function highlightSelection(pin) {
     selectedPin = pin;
+    selectedGroupId = null;
     const marker = markersByPin[pin];
     if (!marker) {
-      // Marker may not be loaded yet (e.g. selection arrived from list
-      // before the map fetch resolved). Clear any stale ring.
+      if (selectionRing) {
+        map.removeLayer(selectionRing);
+        selectionRing = null;
+      }
+      return;
+    }
+    drawSelectionRing(marker.getLatLng(), true);
+  }
+
+  function highlightGroupSelection(groupId) {
+    selectedGroupId = groupId;
+    selectedPin = null;
+    const marker = markersByGroupId[groupId];
+    if (!marker) {
       if (selectionRing) {
         map.removeLayer(selectionRing);
         selectionRing = null;

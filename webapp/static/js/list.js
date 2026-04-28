@@ -64,15 +64,33 @@
 
     currentTotal = data.total;
 
-    if (replace) list.innerHTML = '';
+    if (replace) {
+      list.innerHTML = '';
+      // On a replace, also fetch consolidation groups using the same
+      // filter query string so groups whose members don't match the
+      // filter are pruned from the list. They don't paginate (typically
+      // <100 in a bbox) so we just dump them in once.
+      try {
+        const rg = await fetch(`/api/consolidation-groups?${qs}`);
+        if (rg.ok) {
+          const gd = await rg.json();
+          if (myId !== reqId) return; // stale
+          (gd.groups || []).forEach(g => list.appendChild(renderGroupRow(g)));
+        }
+      } catch (_) { /* non-fatal — parcels still render below */ }
+    }
 
     if (replace && data.parcels.length === 0) {
-      list.textContent = 'No parcels match these filters.';
-      loadMore.style.display = 'none';
+      // Don't override the count label here — groups may have rendered above.
       document.getElementById('count-label').textContent =
         `0 of ${currentTotal.toLocaleString()}`;
       document.getElementById('top-bar-meta').textContent =
         `Score v N/A · ${currentTotal.toLocaleString()} parcels · Top ${LIST_PAGE_SIZE} shown`;
+      // If neither parcels nor groups are present, show the empty state.
+      if (list.children.length === 0) {
+        list.textContent = 'No parcels match these filters.';
+      }
+      loadMore.style.display = 'none';
       return;
     }
 
@@ -133,6 +151,54 @@
       document.querySelectorAll('.parcel-item.selected').forEach(e => e.classList.remove('selected'));
       el.classList.add('selected');
       window.dispatchEvent(new CustomEvent('parcelselect', {detail: {pin: p.pin}}));
+    };
+
+    el.onclick = select;
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        if (e.key === ' ') e.preventDefault();
+        select();
+      }
+    });
+
+    return el;
+  }
+
+  function renderGroupRow(g) {
+    const el = document.createElement('div');
+    el.className = 'parcel-item parcel-item-group';
+    el.dataset.groupId = g.group_id;
+    el.tabIndex = 0;
+    el.setAttribute('role', 'button');
+
+    const details = [
+      `${g.parcel_count} parcels`,
+      g.combined_lot_size_sf
+        ? `${Math.round(g.combined_lot_size_sf).toLocaleString()} SF combined lot`
+        : null,
+      g.combined_building_sf
+        ? `${Math.round(g.combined_building_sf).toLocaleString()} SF combined bldg`
+        : null,
+    ].filter(Boolean).join(' · ');
+
+    const title = g.owner_name || `Group ${g.group_id}`;
+    const tags = [];
+    tags.push(`<span class="tag llc">Consolidation Group</span>`);
+    if (g.sum_estimated_annual_tax) {
+      const t = Math.round(g.sum_estimated_annual_tax).toLocaleString();
+      tags.push(`<span class="tag stage">~$${t}/yr taxes</span>`);
+    }
+
+    el.innerHTML = `
+      <div class="address">${escapeHtml(title)}</div>
+      <div class="details">${escapeHtml(details)}</div>
+      <div class="tags">${tags.join('')}</div>
+    `;
+
+    const select = () => {
+      document.querySelectorAll('.parcel-item.selected').forEach(e => e.classList.remove('selected'));
+      el.classList.add('selected');
+      window.dispatchEvent(new CustomEvent('parcelselect', {detail: {groupId: g.group_id}}));
     };
 
     el.onclick = select;
