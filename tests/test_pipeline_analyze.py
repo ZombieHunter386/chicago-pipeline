@@ -5,6 +5,7 @@ from datetime import datetime, UTC
 
 import numpy as np
 import pandas as pd
+import yaml
 
 from pipeline import analyze
 from pipeline.db import init_db, upsert_rows
@@ -356,3 +357,33 @@ def test_derive_weights_all_insignificant_returns_zero_weights():
     weights = analyze.derive_weights(results)
     assert weights[0]["weight"] == 0.0
     assert weights[0]["insignificant"] is True
+
+
+def test_write_scoring_yaml_roundtrip(tmp_path):
+    weights = [
+        {"signal": "lot_size_sf", "kind": "continuous",
+         "weight": 0.6, "direction": "positive",
+         "normalization": {"min": 1500.0, "max": 12000.0},
+         "insignificant": False,
+         "coef": 0.8, "ci_low": 0.5, "ci_high": 1.1},
+        {"signal": "is_llc", "kind": "binary",
+         "weight": 0.0, "direction": "positive",
+         "normalization": {"min": 0.0, "max": 1.0},
+         "insignificant": True,
+         "coef": 0.05, "ci_low": -0.2, "ci_high": 0.3},
+    ]
+    out_path = tmp_path / "scoring.yaml"
+    analyze.write_scoring_yaml(weights, version="1.0.0-test", top_n=20,
+                               path=out_path)
+    loaded = yaml.safe_load(out_path.read_text())
+    assert loaded["version"] == "1.0.0-test"
+    assert loaded["top_n"] == 20
+    assert "generated_at" in loaded  # ISO-8601 string
+    assert set(loaded["signals"].keys()) == {"lot_size_sf", "is_llc"}
+    lot = loaded["signals"]["lot_size_sf"]
+    assert lot["weight"] == 0.6
+    assert lot["direction"] == "positive"
+    assert lot["kind"] == "continuous"
+    assert lot["normalization"] == {"min": 1500.0, "max": 12000.0}
+    assert lot["insignificant"] is False
+    assert loaded["signals"]["is_llc"]["insignificant"] is True

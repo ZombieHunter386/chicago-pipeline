@@ -6,10 +6,12 @@ fits a logistic regression on z-scored continuous + raw binary features, and
 emits config/scoring.yaml + a markdown analysis report.
 """
 from __future__ import annotations
+from datetime import datetime, UTC
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import yaml
 from sklearn.linear_model import LogisticRegression
 
 from pipeline.config import GeographyConfig
@@ -351,6 +353,37 @@ def derive_weights(regression_results: list[dict]) -> list[dict]:
             "ci_high": r["ci_high"],
         })
     return out
+
+
+def write_scoring_yaml(
+    weights: list[dict],
+    *,
+    version: str,
+    top_n: int,
+    path: Path,
+) -> None:
+    """Emit config/scoring.yaml in the format the Score step (next plan) reads.
+
+    Top-level: version, generated_at, top_n, signals (mapping).
+    Per-signal: weight, kind, direction, normalization {min, max}, insignificant.
+    """
+    payload = {
+        "version": version,
+        "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "top_n": top_n,
+        "signals": {
+            w["signal"]: {
+                "weight": w["weight"],
+                "kind": w["kind"],
+                "direction": w["direction"],
+                "normalization": dict(w["normalization"]),
+                "insignificant": w["insignificant"],
+            }
+            for w in weights
+        },
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(payload, sort_keys=False))
 
 
 def analyze(
