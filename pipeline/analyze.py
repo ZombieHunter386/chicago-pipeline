@@ -6,7 +6,6 @@ fits a logistic regression on z-scored continuous + raw binary features, and
 emits config/scoring.yaml + a markdown analysis report.
 """
 from __future__ import annotations
-import sqlite3
 from pathlib import Path
 
 from pipeline.config import GeographyConfig

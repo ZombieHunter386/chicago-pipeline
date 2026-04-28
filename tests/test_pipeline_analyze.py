@@ -1,6 +1,5 @@
 """Tests for pipeline/analyze.py — the historical-analysis script that derives
 initial scoring weights from permit history."""
-import sqlite3
 from pathlib import Path
 from datetime import datetime, UTC
 
