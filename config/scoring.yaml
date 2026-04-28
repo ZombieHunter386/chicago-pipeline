@@ -1,0 +1,140 @@
+version: 1.0.0-2026-04-28
+generated_at: '2026-04-28T21:19:51+00:00'
+top_n: 20
+signals:
+  lot_size_sf:
+    weight: 0.0
+    kind: continuous
+    direction: positive
+    normalization:
+      min: 1657.0850206752589
+      max: 9547.672149926579
+    insignificant: true
+  hold_duration_years:
+    weight: 0.1489
+    kind: continuous
+    direction: negative
+    normalization:
+      min: 1.64
+      max: 23.49
+    insignificant: false
+  max_far:
+    weight: 0.0757
+    kind: continuous
+    direction: negative
+    normalization:
+      min: 0.9
+      max: 3.0
+    insignificant: false
+  far_gap_delta:
+    weight: 0.0205
+    kind: continuous
+    direction: negative
+    normalization:
+      min: -0.35792
+      max: 1.2676600000000002
+    insignificant: false
+  land_building_ratio:
+    weight: 0.0391
+    kind: continuous
+    direction: negative
+    normalization:
+      min: 0.11517175859700937
+      max: 0.9962261340218983
+    insignificant: false
+  estimated_annual_tax:
+    weight: 0.194
+    kind: continuous
+    direction: negative
+    normalization:
+      min: 6328.6720000000005
+      max: 194040.88600000035
+    insignificant: false
+  tax_increase_pct_5yr:
+    weight: 0.1606
+    kind: continuous
+    direction: negative
+    normalization:
+      min: -10.163950566052748
+      max: 176.78857142857143
+    insignificant: false
+  cta_distance_ft:
+    weight: 0.0337
+    kind: continuous
+    direction: positive
+    normalization:
+      min: 515.38
+      max: 4323.22
+    insignificant: false
+  appeal_count:
+    weight: 0.0
+    kind: continuous
+    direction: positive
+    normalization:
+      min: 1.0
+      max: 6.0
+    insignificant: true
+  open_violations_count:
+    weight: 0.0
+    kind: continuous
+    direction: negative
+    normalization:
+      min: 4.0
+      max: 4.0
+    insignificant: true
+  years_since_last_permit:
+    weight: 0.0
+    kind: continuous
+    direction: negative
+    normalization:
+      min: 7.62
+      max: 7.62
+    insignificant: true
+  vacant_violations_count:
+    weight: 0.0
+    kind: continuous
+    direction: positive
+    normalization:
+      min: 0.0
+      max: 0.0
+    insignificant: true
+  scofflaw_appearances_count:
+    weight: 0.0
+    kind: continuous
+    direction: positive
+    normalization:
+      min: 0.0
+      max: 0.0
+    insignificant: true
+  is_absentee:
+    weight: 0.0818
+    kind: binary
+    direction: negative
+    normalization:
+      min: 0.0
+      max: 1.0
+    insignificant: false
+  is_llc:
+    weight: 0.1533
+    kind: binary
+    direction: positive
+    normalization:
+      min: 0.0
+      max: 1.0
+    insignificant: false
+  allows_multifamily_by_right:
+    weight: 0.0924
+    kind: binary
+    direction: negative
+    normalization:
+      min: 0.0
+      max: 1.0
+    insignificant: false
+  is_scofflaw:
+    weight: 0.0
+    kind: binary
+    direction: positive
+    normalization:
+      min: 0.0
+      max: 1.0
+    insignificant: true
