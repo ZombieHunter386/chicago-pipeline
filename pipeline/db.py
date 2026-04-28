@@ -115,7 +115,9 @@ CREATE TABLE IF NOT EXISTS consolidation_groups (
     combined_lot_size_sf REAL,
     combined_building_sf REAL,
     owner_name TEXT,
-    detected_date TEXT
+    detected_date TEXT,
+    score REAL,
+    score_version TEXT
 );
 
 -- ============================================================
@@ -495,6 +497,8 @@ _LATER_COLUMNS = {
     # add columns to a pre-existing table.
     "consolidation_groups": (
         ("combined_building_sf", "REAL"),
+        ("score", "REAL"),
+        ("score_version", "TEXT"),
     ),
     # Keep BOTH the largest-card and the summed-card values on the raw
     # characteristics row so we can compare 'assessor sum vs largest vs

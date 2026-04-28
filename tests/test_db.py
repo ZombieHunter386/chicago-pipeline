@@ -190,3 +190,20 @@ def test_upsert_rows_composite_key(tmp_path):
     ]
     n = upsert_rows(db, "raw_assessor_parcels", rows, key_columns=["pin", "year"])
     assert n == 2
+
+
+def test_consolidation_groups_has_score_columns(tmp_path):
+    """Schema migration: consolidation_groups gets score + score_version
+    columns on init_db (so existing data/full.db gains them on next open)."""
+    from pipeline.db import init_db, get_connection
+    db_path = tmp_path / "schema.db"
+    init_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        cols = {row[1] for row in conn.execute(
+            "PRAGMA table_info(consolidation_groups)"
+        ).fetchall()}
+    finally:
+        conn.close()
+    assert "score" in cols
+    assert "score_version" in cols
