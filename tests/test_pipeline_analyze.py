@@ -387,3 +387,65 @@ def test_write_scoring_yaml_roundtrip(tmp_path):
     assert lot["normalization"] == {"min": 1500.0, "max": 12000.0}
     assert lot["insignificant"] is False
     assert loaded["signals"]["is_llc"]["insignificant"] is True
+
+
+def test_write_analysis_report_contains_required_sections(tmp_path):
+    funnel = {"total_parcels": 67677, "after_exempt_drop": 67000,
+              "after_no_zone_drop": 66800, "after_pd_drop": 64781,
+              "after_condo_unit_drop": 17753}
+    distributions = [
+        {"signal": "lot_size_sf", "kind": "continuous",
+         "n_positive": 120, "n_negative": 17633,
+         "positive_mean": 9500.0, "negative_mean": 4200.0,
+         "positive_median": 8800.0, "negative_median": 3500.0,
+         "positive_std": 4000.0, "negative_std": 2200.0},
+        {"signal": "is_llc", "kind": "binary",
+         "n_positive": 120, "n_negative": 17633,
+         "positive_rate": 0.65, "negative_rate": 0.14},
+    ]
+    weights = [
+        {"signal": "lot_size_sf", "kind": "continuous",
+         "weight": 0.6, "direction": "positive",
+         "normalization": {"min": 1500.0, "max": 12000.0},
+         "insignificant": False,
+         "coef": 0.8, "ci_low": 0.5, "ci_high": 1.1},
+        {"signal": "is_llc", "kind": "binary",
+         "weight": 0.4, "direction": "positive",
+         "normalization": {"min": 0.0, "max": 1.0},
+         "insignificant": False,
+         "coef": 0.5, "ci_low": 0.2, "ci_high": 0.8},
+    ]
+    imputation = {"lot_size_sf": {"n_imputed": 0, "pct": 0.0},
+                  "is_llc":      {"n_imputed": 0, "pct": 0.0}}
+    out_path = tmp_path / "report.md"
+    analyze.write_analysis_report(
+        path=out_path,
+        db_path=Path("data/full.db"),
+        geo_name="Lincoln Park / Lakeview",
+        n_positive=120,
+        funnel=funnel,
+        imputation=imputation,
+        distributions=distributions,
+        weights=weights,
+        version="1.0.0-test",
+    )
+    body = out_path.read_text()
+    # Header
+    assert "# Initial Scoring Weights" in body
+    assert "Lincoln Park / Lakeview" in body
+    assert "data/full.db" in body
+    assert "1.0.0-test" in body
+    # Funnel mentions every step
+    assert "67,677" in body
+    assert "17,753" in body
+    # Distribution table — at least the column headers and a row
+    assert "lot_size_sf" in body
+    assert "is_llc" in body
+    # Regression results
+    assert "0.5" in body and "1.1" in body  # CI bounds
+    # Top-5 section
+    assert "Top 5 signals by weight" in body
+    # Caveats
+    assert "Caveats" in body
+    assert "tax_delinquent" in body  # the missing signal must be called out
+    assert "snapshot" in body.lower()  # snapshot-fidelity caveat

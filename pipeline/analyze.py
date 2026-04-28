@@ -386,6 +386,132 @@ def write_scoring_yaml(
     path.write_text(yaml.safe_dump(payload, sort_keys=False))
 
 
+def write_analysis_report(
+    *,
+    path: Path,
+    db_path: Path,
+    geo_name: str,
+    n_positive: int,
+    funnel: dict,
+    imputation: dict,
+    distributions: list[dict],
+    weights: list[dict],
+    version: str,
+) -> None:
+    """Emit the markdown analysis report. Everything in the report is derived
+    from the args — no DB access here, so the report writer is testable in
+    isolation."""
+    lines: list[str] = []
+    a = lines.append
+    a(f"# Initial Scoring Weights — {geo_name}")
+    a("")
+    a(f"- **Version:** `{version}`")
+    a(f"- **Generated at:** {datetime.now(UTC).isoformat(timespec='seconds')}")
+    a(f"- **DB:** `{db_path}`")
+    a(f"- **Positive examples (qualifying permits 2006-present):** {n_positive:,}")
+    a("")
+
+    # Funnel
+    a("## Eligibility funnel")
+    a("")
+    a("| Step | Parcels remaining |")
+    a("|---|---|")
+    a(f"| Total parcels in DB | {funnel['total_parcels']:,} |")
+    a(f"| After dropping tax-exempt | {funnel['after_exempt_drop']:,} |")
+    a(f"| After dropping no-zone-class | {funnel['after_no_zone_drop']:,} |")
+    a(f"| After dropping PD-zoned | {funnel['after_pd_drop']:,} |")
+    a(f"| After dropping condo units | **{funnel['after_condo_unit_drop']:,}** (training set) |")
+    a("")
+
+    # Imputation rates
+    a("## Imputation rates")
+    a("")
+    a("Continuous NULLs imputed with the training-set median; binary NULLs imputed with 0.")
+    a("")
+    a("| Signal | n imputed | % of training set |")
+    a("|---|---|---|")
+    for sig, rate in imputation.items():
+        a(f"| {sig} | {rate['n_imputed']:,} | {rate['pct']}% |")
+    a("")
+
+    # Distribution comparisons
+    a("## Per-signal distribution: positive vs. negative")
+    a("")
+    a("| Signal | Kind | n+ | n- | Pos mean | Neg mean | Pos med | Neg med | Pos rate | Neg rate |")
+    a("|---|---|---|---|---|---|---|---|---|---|")
+    for d in distributions:
+        if d["kind"] == "continuous":
+            a(f"| {d['signal']} | continuous | {d['n_positive']:,} | {d['n_negative']:,} | "
+              f"{d['positive_mean']} | {d['negative_mean']} | "
+              f"{d['positive_median']} | {d['negative_median']} | — | — |")
+        else:
+            a(f"| {d['signal']} | binary | {d['n_positive']:,} | {d['n_negative']:,} | "
+              f"— | — | — | — | {d['positive_rate']} | {d['negative_rate']} |")
+    a("")
+
+    # Regression results
+    a("## Logistic regression results")
+    a("")
+    a("Continuous features are z-scored before fitting so coefficients are comparable. "
+      "95% CIs are bootstrap (200 iterations, sample-with-replacement). "
+      "A signal is **significant** when its 95% CI does not cross 0; insignificant "
+      "signals get weight 0 and are not used in the score.")
+    a("")
+    a("| Signal | Coef | 95% CI | Significant | Direction | Weight |")
+    a("|---|---|---|---|---|---|")
+    for w in weights:
+        ci = f"[{w['ci_low']:.3f}, {w['ci_high']:.3f}]"
+        sig = "yes" if not w["insignificant"] else "**no**"
+        a(f"| {w['signal']} | {w['coef']:.3f} | {ci} | {sig} | {w['direction']} | "
+          f"{w['weight']:.3f} |")
+    a("")
+
+    # Top 5 by weight
+    significant = [w for w in weights if not w["insignificant"]]
+    significant.sort(key=lambda x: x["weight"], reverse=True)
+    a("## Top 5 signals by weight magnitude")
+    a("")
+    if not significant:
+        a("_No signals reached significance — see Caveats._")
+    else:
+        for i, w in enumerate(significant[:5], 1):
+            a(f"{i}. **{w['signal']}** — weight {w['weight']:.3f}, direction {w['direction']}")
+    a("")
+
+    # Caveats
+    a("## Caveats")
+    a("")
+    a("- **Snapshot fidelity:** v1 uses the *current* parcels table for all features, "
+      "not a per-PIN reconstructed pre-development snapshot. Most signals (zoning class, "
+      "lot_size_sf, cta_distance_ft, is_llc) don't change materially year-to-year; signals "
+      "that do (hold_duration_years, assessed-value trends) are biased toward the post-event "
+      "state. Document the bias direction; refine in a future iteration if a signal's "
+      "weight looks suspiciously high.")
+    a("- **`tax_delinquent` excluded entirely:** the Cook County Clerk delinquent-tax "
+      "CSV referenced in the data-sources spec is a header-only stub on `data/full.db` "
+      "(see `docs/analysis/2026-04-27-data-source-audit.md` §1). The strongest "
+      "motivation-to-sell signal in the literature is missing. The model will under-weight "
+      "motivation as a result; decide on access path (targeted scrape vs FOIA) before "
+      "re-running.")
+    a("- **`has_vacancy_report` excluded:** the configured 311 dataset (`7nii-7srd`) is "
+      "a defunct legacy feed that ends in 2018; switching to `vauj-4grr` is on the audit's "
+      "Tier-1 do-list.")
+    a("- **Condo + commercial building data gap:** `building_sf`, `year_built`, `condition`, "
+      "`built_far` are excluded from features because ~78% of all parcels (and ~35% of the "
+      "non-condo-unit subset) lack values. This will improve once the building-footprints "
+      "merge from the audit branch is run against the live DB.")
+    a("- **`open_violations_count` and `years_since_last_permit` are sparse:** the "
+      "address-first matcher fix shipped in this branch hasn't been re-run on `data/full.db` "
+      "yet at training time. Re-run those two fetches and re-run analyze for tighter CIs.")
+    a("- **`appeal_count` is too coarse:** ~80% of parcels show ≥1 lifetime appeal. The "
+      "audit recommends windowing this to last-3-years; v1 uses lifetime as-is.")
+    a("- **`is_absentee` is over-firing on condo buildings:** 54.5% true population-wide. "
+      "The condo-unit drop in the eligibility funnel removes most of the false positives, "
+      "but the building-rep PINs (mailed to property managers) likely still over-fire.")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines))
+
+
 def analyze(
     db_path: Path,
     geo: GeographyConfig,
