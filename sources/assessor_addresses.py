@@ -1,100 +1,32 @@
 """Source 1B — Cook County Assessor Parcel Addresses."""
 from __future__ import annotations
-import re
 from datetime import datetime, UTC
 from pathlib import Path
 from pipeline.config import GeographyConfig
 from pipeline.db import upsert_rows, get_connection
 from pipeline.socrata import SocrataClient
 
+# Address normalization helpers live in pipeline/address.py; re-exported here
+# for backwards compatibility with existing imports/tests.
+from pipeline.address import (
+    is_llc,
+    is_absentee,
+    street_key as _street_key,
+    LLC_PATTERN,
+    SUFFIX_MAP,
+    DIRECTION_MAP,
+)
+
+__all__ = [
+    "DATASET_ID", "TABLE", "SOURCE_NAME",
+    "fetch", "is_llc", "is_absentee",
+    "_street_key", "LLC_PATTERN", "SUFFIX_MAP", "DIRECTION_MAP",
+]
+
 
 DATASET_ID = "3723-97qp"
 TABLE = "raw_assessor_addresses"
 SOURCE_NAME = "assessor_addresses"
-
-# Keyword list uses no trailing dots inside alternatives; we allow an optional
-# trailing `.` after the end `\b` so dotted forms like "L.L.C.", "L.P.", "Inc."
-# still match. Using `\b` with a trailing `.` was the bug — `\b` requires a
-# word char on one side, and a trailing `.` after the final letter makes that
-# side a non-word character, so the boundary fails.
-LLC_PATTERN = re.compile(
-    r"\b(LLC|L\.L\.C|CORP|CORPORATION|INC|INCORPORATED|TRUST|LP|L\.P|PARTNERS|PARTNERSHIP|LLP|L\.L\.P|HOLDINGS|REALTY|PROPERTIES)\b\.?",
-    re.IGNORECASE,
-)
-
-
-def is_llc(name: str | None) -> bool:
-    if not name:
-        return False
-    return bool(LLC_PATTERN.search(name))
-
-
-SUFFIX_MAP = {
-    "AVENUE": "AVE", "AV": "AVE", "AVE": "AVE",
-    "BOULEVARD": "BLVD", "BL": "BLVD", "BLVD": "BLVD",
-    "PARKWAY": "PKWY", "PKY": "PKWY", "PKWY": "PKWY",
-    "STREET": "ST", "ST": "ST",
-    "ROAD": "RD", "RD": "RD",
-    "DRIVE": "DR", "DR": "DR",
-    "LANE": "LN", "LN": "LN",
-    "COURT": "CT", "CT": "CT",
-    "PLACE": "PL", "PL": "PL",
-    "TERRACE": "TER", "TER": "TER",
-    "HIGHWAY": "HWY", "HWY": "HWY",
-    "PLAZA": "PLZ", "PLZ": "PLZ",
-    "SQUARE": "SQ", "SQ": "SQ",
-    "WAY": "WAY",
-}
-DIRECTION_MAP = {
-    "NORTH": "N", "N": "N",
-    "SOUTH": "S", "S": "S",
-    "EAST": "E", "E": "E",
-    "WEST": "W", "W": "W",
-    "NORTHEAST": "NE", "NE": "NE",
-    "NORTHWEST": "NW", "NW": "NW",
-    "SOUTHEAST": "SE", "SE": "SE",
-    "SOUTHWEST": "SW", "SW": "SW",
-}
-SUFFIX_TOKENS = set(SUFFIX_MAP.values())
-UNIT_MARKER_RE = re.compile(r"\b(UNIT|APT|APARTMENT|STE|SUITE)\s+\S+", re.IGNORECASE)
-HASH_UNIT_RE = re.compile(r"#\s*\S+")
-
-
-def _street_key(addr: str | None) -> str | None:
-    """Canonicalize an address to '<number> <dir> <street...> <suffix>'.
-    Drops unit numbers (UNIT 5, APT 3, #4, trailing 1E/2W condo tokens).
-    Returns None for empty input. PO BOX-style addresses round-trip without
-    a suffix and still compare correctly against street-form mail addresses."""
-    if not addr:
-        return None
-    s = re.sub(r"\s+", " ", addr).strip().upper()
-    # Strip explicit unit markers first so they don't muddy tokenization.
-    s = UNIT_MARKER_RE.sub(" ", s)
-    s = HASH_UNIT_RE.sub(" ", s)
-    # Insert space at letter→digit and digit→letter boundaries so PKWY1E → PKWY 1 E
-    s = re.sub(r"([A-Z])(\d)", r"\1 \2", s)
-    s = re.sub(r"(\d)([A-Z])", r"\1 \2", s)
-    s = re.sub(r"[.,]", " ", s)
-    s = re.sub(r"\s+", " ", s).strip()
-    if not s:
-        return None
-    tokens = [DIRECTION_MAP.get(t, SUFFIX_MAP.get(t, t)) for t in s.split()]
-    # Truncate after the last suffix token so trailing unit fragments are dropped.
-    last_suffix = -1
-    for i, t in enumerate(tokens):
-        if t in SUFFIX_TOKENS:
-            last_suffix = i
-    if last_suffix >= 0:
-        tokens = tokens[:last_suffix + 1]
-    return " ".join(tokens) or None
-
-
-def is_absentee(prop_addr: str | None, mail_addr: str | None) -> bool:
-    p = _street_key(prop_addr)
-    m = _street_key(mail_addr)
-    if p is None or m is None:
-        return False
-    return p != m
 
 
 def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient) -> int:

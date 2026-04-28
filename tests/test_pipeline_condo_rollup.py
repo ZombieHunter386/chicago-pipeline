@@ -13,9 +13,26 @@ def _seed(db_path: Path, rows: list[dict]):
                 """INSERT INTO parcels
                        (pin, pin10, property_class, assessed_total,
                         assessed_land, assessed_building, estimated_annual_tax,
+                        building_sf,
                         first_seen_date, last_updated_date, stage)
                    VALUES (:pin, :pin10, :cls, :at, :al, :ab, :etax,
+                           :bsf,
                            '2026-04-26', '2026-04-26', 'scored')""",
+                {**r, "bsf": r.get("bsf")},
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _seed_raw_chars(db_path: Path, rows: list[dict]):
+    conn = get_connection(db_path)
+    try:
+        for r in rows:
+            conn.execute(
+                "INSERT INTO raw_assessor_characteristics "
+                "  (pin, year, char_bldg_sf, fetched_at) "
+                "VALUES (:pin, '2025', :bsf, '2026-04-26')",
                 r,
             )
         conn.commit()
@@ -134,6 +151,58 @@ def test_rollup_is_idempotent(tmp_path):
     ).fetchone()
     assert rep["condo_unit_count"] == 2
     assert rep["assessed_total"] == 200000
+
+
+def test_rollup_sums_building_sf_onto_rep(tmp_path):
+    """Each condo unit's char_bldg_sf is its own interior sf; the rep's
+    building_sf must sum across all units in the pin10 to reflect the
+    whole building's footprint."""
+    db = tmp_path / "t.db"
+    init_db(db)
+    _seed(db, [
+        {"pin": "60000000000001", "pin10": "6000000000", "cls": "299",
+         "at": 100000, "al": 30000, "ab": 70000, "etax": 6700, "bsf": 1200},
+        {"pin": "60000000000002", "pin10": "6000000000", "cls": "299",
+         "at": 100000, "al": 30000, "ab": 70000, "etax": 6700, "bsf": 1200},
+        {"pin": "60000000000003", "pin10": "6000000000", "cls": "299",
+         "at": 100000, "al": 30000, "ab": 70000, "etax": 6700, "bsf": 1500},
+    ])
+    rollup_condos(db)
+    conn = get_connection(db)
+    rep = conn.execute(
+        "SELECT building_sf, condo_unit_count "
+        "FROM parcels WHERE pin='60000000000001'"
+    ).fetchone()
+    assert rep["building_sf"] == 3900.0  # 1200 + 1200 + 1500
+    assert rep["condo_unit_count"] == 3
+
+
+def test_rollup_building_sf_idempotent_via_raw_restore(tmp_path):
+    """Re-running rollup must not double-sum building_sf. The rep's per-PIN
+    bldg_sf is restored from raw_assessor_characteristics before summing."""
+    db = tmp_path / "t.db"
+    init_db(db)
+    _seed(db, [
+        {"pin": "70000000000001", "pin10": "7000000000", "cls": "299",
+         "at": 100000, "al": 30000, "ab": 70000, "etax": 6700, "bsf": 1000},
+        {"pin": "70000000000002", "pin10": "7000000000", "cls": "299",
+         "at": 100000, "al": 30000, "ab": 70000, "etax": 6700, "bsf": 1000},
+    ])
+    _seed_raw_values(db, [
+        {"pin": "70000000000001", "tot": 100000, "land": 30000, "bldg": 70000},
+        {"pin": "70000000000002", "tot": 100000, "land": 30000, "bldg": 70000},
+    ])
+    _seed_raw_chars(db, [
+        {"pin": "70000000000001", "bsf": 1000},
+        {"pin": "70000000000002", "bsf": 1000},
+    ])
+    rollup_condos(db)
+    rollup_condos(db)
+    conn = get_connection(db)
+    rep = conn.execute(
+        "SELECT building_sf FROM parcels WHERE pin='70000000000001'"
+    ).fetchone()
+    assert rep["building_sf"] == 2000.0  # NOT 4000 (would be if double-summed)
 
 
 def test_rollup_includes_mixed_classes_under_condo_pin10(tmp_path):

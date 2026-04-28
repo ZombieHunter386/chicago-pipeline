@@ -45,9 +45,15 @@ SMOKE_DB = Path(__file__).resolve().parent.parent / "data" / "smoke.db"
 
 @pytest.fixture
 def populated_db_path(tmp_path):
-    """Isolated copy of data/smoke.db (641 parcels) for webapp tests."""
+    """Isolated copy of data/smoke.db (641 parcels) for webapp tests.
+
+    Reapplies the schema migration after copying so tests stay green when
+    pipeline.db gains new columns — without it, an old smoke.db checked into
+    the repo would fail every test that touches the new columns until smoke
+    is regenerated."""
     if not SMOKE_DB.exists():
         pytest.skip(f"smoke.db not present at {SMOKE_DB}")
     dst = tmp_path / "smoke.db"
     shutil.copy(SMOKE_DB, dst)
+    init_db(dst)
     return dst

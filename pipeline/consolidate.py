@@ -55,7 +55,7 @@ def consolidate(db_path: Path) -> int:
     conn = get_connection(db_path)
     try:
         rows = conn.execute("""
-            SELECT pin, lat, lng, lot_size_sf, owner_name, mail_address
+            SELECT pin, lat, lng, lot_size_sf, building_sf, owner_name, mail_address
             FROM parcels
             WHERE lat IS NOT NULL AND lng IS NOT NULL AND owner_name IS NOT NULL
         """).fetchall()
@@ -83,10 +83,12 @@ def consolidate(db_path: Path) -> int:
                     continue
                 pins = sorted(p["pin"] for p in cluster)
                 total_lot = sum((p["lot_size_sf"] or 0) for p in cluster) or None
+                total_bldg = sum((p["building_sf"] or 0) for p in cluster) or None
                 cur = conn.execute("""
-                    INSERT INTO consolidation_groups (pins, combined_lot_size_sf, owner_name, detected_date)
-                    VALUES (?, ?, ?, ?)
-                """, (json.dumps(pins), total_lot, owner, today))
+                    INSERT INTO consolidation_groups (pins, combined_lot_size_sf,
+                                                      combined_building_sf, owner_name, detected_date)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (json.dumps(pins), total_lot, total_bldg, owner, today))
                 gid = cur.lastrowid
                 for pin in pins:
                     conn.execute(

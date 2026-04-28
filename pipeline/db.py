@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS parcels (
     max_far REAL,
     built_far REAL,
     far_gap REAL,
+    far_gap_delta REAL,             -- max_far - built_far ("FAR points available")
     allows_multifamily_by_right INTEGER,
     min_lot_area_per_unit REAL,
     max_units_allowed INTEGER,
@@ -71,6 +72,16 @@ CREATE TABLE IF NOT EXISTS parcels (
     is_condo_unit INTEGER DEFAULT 0,
     is_condo_building INTEGER DEFAULT 0,
     condo_unit_count INTEGER,
+    -- Building (added 2026-04-27 with footprints + scofflaw + vacant-violation sources)
+    unit_count INTEGER,
+    building_sf_source TEXT,        -- 'assessor' | 'footprint'
+    condition_source TEXT,          -- 'assessor' | 'footprint'
+    is_scofflaw INTEGER,
+    scofflaw_appearances_count INTEGER,
+    most_recent_scofflaw_list_date TEXT,
+    vacant_violations_count INTEGER,
+    vacant_violations_amount_due REAL,
+    most_recent_vacant_violation_date TEXT,
     -- Listing (populated in Plan 4)
     listing_status TEXT,
     listing_check_date TEXT,
@@ -102,6 +113,7 @@ CREATE TABLE IF NOT EXISTS consolidation_groups (
     group_id INTEGER PRIMARY KEY AUTOINCREMENT,
     pins TEXT NOT NULL,                  -- JSON array of PINs
     combined_lot_size_sf REAL,
+    combined_building_sf REAL,
     owner_name TEXT,
     detected_date TEXT
 );
@@ -374,6 +386,71 @@ CREATE TABLE IF NOT EXISTS raw_clerk_delinquent (
     fetched_at TEXT
 );
 
+-- Source 2G: Building Code Scofflaw List (crg5-4zyp)
+CREATE TABLE IF NOT EXISTS raw_cdp_scofflaw (
+    record_id TEXT PRIMARY KEY,
+    address TEXT,
+    secondary_address TEXT,
+    tertiary_address TEXT,
+    defendant_owner TEXT,
+    circuit_court_case_number TEXT,
+    building_list_date TEXT,
+    owner_list_date TEXT,
+    community_area TEXT,
+    ward TEXT,
+    latitude REAL,
+    longitude REAL,
+    fetched_at TEXT
+);
+
+-- Source 2H: Vacant and Abandoned Buildings — Violations (kc9i-wq85)
+CREATE TABLE IF NOT EXISTS raw_cdp_vacant_violations (
+    docket_number TEXT PRIMARY KEY,
+    violation_number TEXT,
+    issued_date TEXT,
+    issuing_department TEXT,
+    last_hearing_date TEXT,
+    property_address TEXT,
+    violation_type TEXT,
+    entity_or_person TEXT,
+    disposition_description TEXT,
+    total_fines REAL,
+    total_administrative_costs REAL,
+    interest_amount REAL,
+    collection_costs_or_attorney_fees REAL,
+    court_cost REAL,
+    original_total_amount_due REAL,
+    total_paid REAL,
+    current_amount_due REAL,
+    latitude REAL,
+    longitude REAL,
+    fetched_at TEXT
+);
+
+-- Source 2I: Chicago Building Footprints (syp8-uezg) — frozen at 2010-2011
+CREATE TABLE IF NOT EXISTS raw_cdp_building_footprints (
+    bldg_id TEXT PRIMARY KEY,
+    bldg_statu TEXT,
+    f_add1 TEXT,
+    t_add1 TEXT,
+    pre_dir1 TEXT,
+    st_name1 TEXT,
+    st_type1 TEXT,
+    suf_dir1 TEXT,
+    bldg_sq_fo REAL,
+    shape_area REAL,
+    stories INTEGER,
+    no_of_unit INTEGER,
+    year_built INTEGER,
+    bldg_condi TEXT,
+    demolished TEXT,
+    edit_date TEXT,
+    geom_geojson TEXT,
+    centroid_lat REAL,
+    centroid_lng REAL,
+    fetched_at TEXT
+);
+
 -- ============================================================
 -- Fetch log — one row per source per fetch run
 -- ============================================================
@@ -397,11 +474,49 @@ def get_connection(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
+# Columns added after the original schema. ALTER TABLE on each at init time so
+# existing DBs gain the new columns without losing data. SQLite raises
+# "duplicate column" if the column already exists; we swallow that.
+_LATER_COLUMNS = {
+    "parcels": (
+        ("unit_count", "INTEGER"),
+        ("building_sf_source", "TEXT"),
+        ("condition_source", "TEXT"),
+        ("is_scofflaw", "INTEGER"),
+        ("scofflaw_appearances_count", "INTEGER"),
+        ("most_recent_scofflaw_list_date", "TEXT"),
+        ("vacant_violations_count", "INTEGER"),
+        ("vacant_violations_amount_due", "REAL"),
+        ("most_recent_vacant_violation_date", "TEXT"),
+        ("far_gap_delta", "REAL"),
+    ),
+    # combined_building_sf was added to consolidation_groups in a prior commit
+    # but the migration was never written; CREATE TABLE IF NOT EXISTS doesn't
+    # add columns to a pre-existing table.
+    "consolidation_groups": (
+        ("combined_building_sf", "REAL"),
+    ),
+    # Keep BOTH the largest-card and the summed-card values on the raw
+    # characteristics row so we can compare 'assessor sum vs largest vs
+    # footprint' per parcel without needing to refetch.
+    "raw_assessor_characteristics": (
+        ("char_bldg_sf_sum", "REAL"),
+    ),
+}
+
+
 def init_db(db_path: Path) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = get_connection(db_path)
     try:
         conn.executescript(SCHEMA_SQL)
+        for table, columns in _LATER_COLUMNS.items():
+            for col, sql_type in columns:
+                try:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {sql_type}")
+                except sqlite3.OperationalError as e:
+                    if "duplicate column" not in str(e).lower():
+                        raise
         conn.commit()
     finally:
         conn.close()

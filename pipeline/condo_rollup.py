@@ -29,7 +29,7 @@ def rollup_condos(db_path: Path) -> int:
             r["pin"]: dict(r) for r in conn.execute(
                 "SELECT pin, pin10, property_class, assessed_total, "
                 "       assessed_land, assessed_building, estimated_annual_tax, "
-                "       is_condo_building "
+                "       building_sf, is_condo_building "
                 "FROM parcels"
             )
         }
@@ -40,9 +40,10 @@ def rollup_condos(db_path: Path) -> int:
             "       condo_unit_count = NULL"
         )
 
-        # For previous reps, the snapshot's AV is the sum-from-last-run.
-        # Override with the per-PIN value from raw_assessor_values so we
-        # don't double-count on re-run.
+        # For previous reps, the snapshot's summed columns reflect the prior
+        # rollup. Restore per-PIN values from raw tables so re-runs don't
+        # double-count: AV from raw_assessor_values, building_sf from
+        # raw_assessor_characteristics (latest year).
         prev_reps = [pin for pin, r in snapshot.items() if r["is_condo_building"]]
         if prev_reps:
             placeholders = ",".join("?" * len(prev_reps))
@@ -67,6 +68,17 @@ def rollup_condos(db_path: Path) -> int:
                 snapshot[pin]["assessed_building"] = bldg
                 snapshot[pin]["_av_reset"] = True
 
+            for r in conn.execute(
+                f"SELECT pin, char_bldg_sf, year FROM raw_assessor_characteristics "
+                f"WHERE pin IN ({placeholders}) ORDER BY pin, year DESC",
+                prev_reps,
+            ):
+                pin = r["pin"]
+                if snapshot.get(pin, {}).get("_bldg_sf_reset"):
+                    continue
+                snapshot[pin]["building_sf"] = r["char_bldg_sf"]
+                snapshot[pin]["_bldg_sf_reset"] = True
+
         condo_pin10s = sorted({
             r["pin10"] for r in snapshot.values()
             if r["pin10"] and r["property_class"] in CONDO_CLASSES
@@ -89,6 +101,7 @@ def rollup_condos(db_path: Path) -> int:
             sum_al = sum((r["assessed_land"] or 0) for r in rows) or None
             sum_ab = sum((r["assessed_building"] or 0) for r in rows) or None
             sum_et = sum((r["estimated_annual_tax"] or 0) for r in rows) or None
+            sum_bldg_sf = sum((r["building_sf"] or 0) for r in rows) or None
 
             conn.execute(
                 "UPDATE parcels SET "
@@ -97,9 +110,10 @@ def rollup_condos(db_path: Path) -> int:
                 "  assessed_total = ?, "
                 "  assessed_land = ?, "
                 "  assessed_building = ?, "
-                "  estimated_annual_tax = ? "
+                "  estimated_annual_tax = ?, "
+                "  building_sf = ? "
                 "WHERE pin = ?",
-                (len(rows), sum_at, sum_al, sum_ab, sum_et, rep_pin),
+                (len(rows), sum_at, sum_al, sum_ab, sum_et, sum_bldg_sf, rep_pin),
             )
             if unit_pins:
                 placeholders = ",".join("?" * len(unit_pins))

@@ -119,9 +119,6 @@
       const u = p.condo_unit_count || 0;
       tags.push(`<span class="tag stage">Condo · ${u} unit${u === 1 ? '' : 's'}</span>`);
     }
-    if (p.listing_status === 'listed') {
-      tags.push('<span class="tag listed">Listed</span>');
-    }
     if (p.stage && p.stage !== 'scored') {
       tags.push(`<span class="tag stage">${escapeHtml(capitalize(p.stage))}</span>`);
     }

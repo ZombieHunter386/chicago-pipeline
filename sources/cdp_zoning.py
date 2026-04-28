@@ -1,6 +1,7 @@
 """Source 2A — Chicago Zoning Districts (with spatial join)."""
 from __future__ import annotations
 import json
+import re
 from datetime import datetime, UTC
 from pathlib import Path
 import geopandas as gpd
@@ -18,6 +19,21 @@ from pipeline.zoning_lookup import load_zoning_lookup
 DATASET_ID = "dj47-wfun"
 TABLE = "raw_cdp_zoning"
 SOURCE_NAME = "cdp_zoning"
+
+
+# Source data is inconsistent on hyphens for residential zones.
+# E.g. polygons appear as "RM5.5" / "RM4.5" but the lookup keys them as
+# "RM-5.5" / "RM-4.5". Normalize so the lookup actually hits.
+_HYPHEN_RE = re.compile(r"^(RS|RT|RM)(\d)")
+
+
+def _normalize_zone_class(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    s = str(raw).strip().upper()
+    if not s:
+        return None
+    return _HYPHEN_RE.sub(r"\1-\2", s)
 
 
 def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient,
@@ -38,7 +54,7 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient,
             geom = shape(gj)
         except Exception:
             continue
-        zc = r.get("zone_class")
+        zc = _normalize_zone_class(r.get("zone_class"))
         oid = r.get("objectid") or r.get("zone_id") or f"{zc}-{len(raw_rows)}"
         raw_rows.append({
             "objectid": str(oid),
@@ -89,7 +105,11 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient,
             zc_raw = j.get("zone_class")
             # Left sjoin yields NaN (float) for parcels outside any polygon.
             # Coerce to None so it doesn't serialize as the string "nan" into TEXT.
-            zc = None if zc_raw is None or pd.isna(zc_raw) else zc_raw
+            zc = (
+                None
+                if zc_raw is None or pd.isna(zc_raw)
+                else _normalize_zone_class(zc_raw)
+            )
             zi = zone_info.get(zc) if zc else None
             max_far = zi.max_far if zi else None
             # When zone is unknown, leave allows_multifamily_by_right as NULL
@@ -98,6 +118,7 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient,
             allows_mf = None if zi is None else (1 if zi.allows_multifamily else 0)
             built = j["built_far"]
             far_gap = (max_far / built) if (max_far and built and built > 0) else None
+            far_gap_delta = (max_far - built) if (max_far is not None and built is not None) else None
             min_lot_pu = zi.min_lot_area_per_unit if zi else None
             lot_raw = j["lot_size_sf"]
             lot = None if lot_raw is None or pd.isna(lot_raw) else float(lot_raw)
@@ -111,12 +132,14 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient,
                     zone_class = :zc,
                     max_far = :max_far,
                     far_gap = :far_gap,
+                    far_gap_delta = :far_gap_delta,
                     allows_multifamily_by_right = :amf,
                     min_lot_area_per_unit = :mlpu,
                     max_units_allowed = :mu,
                     last_updated_date = :now
                 WHERE pin = :pin
             """, {"zc": zc, "max_far": max_far, "far_gap": far_gap,
+                  "far_gap_delta": far_gap_delta,
                   "amf": allows_mf, "mlpu": min_lot_pu, "mu": max_units,
                   "now": fetched_at, "pin": j["pin"]})
         conn.commit()

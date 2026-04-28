@@ -6,18 +6,31 @@
     top: '#238636',
     consolidated: '#a855f7',
     outreach: '#58a6ff',
-    listed: '#f0883e',
-    other: '#484f58',
+    other: '#f85149',
+  };
+
+  const BASEMAPS = {
+    dark: {
+      url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+      maxZoom: 19,
+    },
+    satellite: {
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+      maxZoom: 19,
+    },
   };
 
   let map = null;
   let markerLayer = null;
+  let basemapLayer = null;
   let markersByPin = {};
   let selectionRing = null;
   let selectedPin = null;
   let reqId = 0;
   const layerEnabled = {
-    top: true, consolidated: true, outreach: true, listed: true, other: true,
+    top: true, consolidated: true, outreach: true, other: true,
   };
 
   let mapSortBy = '';
@@ -40,10 +53,7 @@
 
   function initMap() {
     map = L.map('map', { zoomControl: false }).setView([41.9395, -87.6535], 14);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-      maxZoom: 19,
-    }).addTo(map);
+    setBasemap('dark');
     L.control.zoom({ position: 'bottomright' }).addTo(map);
     markerLayer = L.layerGroup().addTo(map);
 
@@ -56,6 +66,22 @@
         }
       });
     });
+
+    document.querySelectorAll('input[name="basemap"]').forEach(r => {
+      r.addEventListener('change', (e) => {
+        if (e.target.checked) setBasemap(e.target.value);
+      });
+    });
+  }
+
+  function setBasemap(name) {
+    const cfg = BASEMAPS[name] || BASEMAPS.dark;
+    if (basemapLayer) map.removeLayer(basemapLayer);
+    basemapLayer = L.tileLayer(cfg.url, {
+      attribution: cfg.attribution,
+      maxZoom: cfg.maxZoom,
+    }).addTo(map);
+    basemapLayer.bringToBack();
   }
 
   async function loadMap() {
@@ -90,14 +116,13 @@
       const props = f.properties || {};
       const cat = CATEGORY_COLORS[props.category] ? props.category : 'other';
       const color = CATEGORY_COLORS[cat];
-      const isOther = cat === 'other';
 
       const marker = L.circleMarker([lat, lng], {
-        radius: isOther ? 3 : 7,
+        radius: 7,
         color,
         fillColor: color,
-        fillOpacity: isOther ? 0.5 : 0.8,
-        weight: isOther ? 0 : 2,
+        fillOpacity: 0.8,
+        weight: 2,
       });
       marker.feature = f;
       marker._category = cat;
@@ -142,8 +167,7 @@
     markerLayer.eachLayer(m => {
       const cat = m._category || 'other';
       const visible = !!layerEnabled[cat];
-      const fillOpacity = visible ? (cat === 'other' ? 0.5 : 0.8) : 0;
-      m.setStyle({ opacity: visible ? 1 : 0, fillOpacity });
+      m.setStyle({ opacity: visible ? 1 : 0, fillOpacity: visible ? 0.8 : 0 });
     });
     syncSelectionRingVisibility();
   }

@@ -21,6 +21,7 @@ from sources import (
     assessor_values, assessor_sales, assessor_appeals, assessor_exempt,
     ccgis_parcels,
     cdp_zoning, cdp_permits, cdp_violations, cdp_vacant, cdp_cta_stations,
+    cdp_scofflaw, cdp_vacant_violations, cdp_building_footprints,
     clerk_delinquent,
 )
 
@@ -104,10 +105,15 @@ def run_all(geo: GeographyConfig, db_path: Path, app_token: str,
     results.append(_run("cdp_permits", cdp_permits.fetch, db_path, geo, db_path, cdp))
     results.append(_run("cdp_violations", cdp_violations.fetch, db_path, geo, db_path, cdp))
     results.append(_run("cdp_vacant", cdp_vacant.fetch, db_path, geo, db_path, cdp))
+    results.append(_run("cdp_scofflaw", cdp_scofflaw.fetch, db_path, geo, db_path, cdp))
+    results.append(_run("cdp_vacant_violations", cdp_vacant_violations.fetch, db_path, geo, db_path, cdp))
     results.append(_run("cdp_cta_stations", cdp_cta_stations.fetch, db_path, geo, db_path, cdp))
     results.append(_run("clerk_delinquent", clerk_delinquent.fetch, db_path, geo, db_path, None))
     results.append(_run("consolidate", consolidate, db_path, db_path))
     results.append(_run("condo_rollup", rollup_condos, db_path, db_path))
+    # Footprints runs LAST so condo_rollup's is_condo_building flag is set —
+    # the merge needs to redirect unit-PIN matches to the building rep PIN.
+    results.append(_run("cdp_building_footprints", cdp_building_footprints.fetch, db_path, geo, db_path, cdp))
     return results
 
 

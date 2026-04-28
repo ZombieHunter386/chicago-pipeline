@@ -6,20 +6,32 @@ from pipeline.config import GeographyConfig
 from pipeline.db import upsert_rows, get_connection
 from pipeline.geography import filter_by_polygon, bbox_where_clause
 from pipeline.socrata import SocrataClient
-from pipeline.spatial import match_records_to_parcels
+from pipeline.spatial import (
+    DEFAULT_GEO_RADIUS_FT,
+    match_records_to_parcels_with_address,
+)
 
 
 DATASET_ID = "ydr8-5enu"
 TABLE = "raw_cdp_permits"
 SOURCE_NAME = "cdp_permits"
 TODAY = date.today()
-MATCH_RADIUS_FT = 50.0
 
 
 def _f(v):
     if v in (None, ""): return None
     try: return float(v)
     except (TypeError, ValueError): return None
+
+
+def _record_address(r: dict) -> str | None:
+    parts = [
+        (r.get("street_number") or "").strip(),
+        (r.get("street_direction") or "").strip(),
+        (r.get("street_name") or "").strip(),
+    ]
+    parts = [p for p in parts if p]
+    return " ".join(parts) if parts else None
 
 
 def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient) -> int:
@@ -47,20 +59,26 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient) -> int:
     raw_rows = [r for r in raw_rows if r["permit_number"]]
     n = upsert_rows(db_path, TABLE, raw_rows, key_columns=["permit_number"])
 
-    # Match each permit to nearest parcel within MATCH_RADIUS_FT
+    # Match each permit address-first, with 75ft geo fallback. Address-only
+    # records (no lat/lng) still match via the address tier; lat/lng-only
+    # records (rare) hit only the geo fallback.
     conn = get_connection(db_path)
     try:
         parcels = [dict(p) for p in conn.execute(
-            "SELECT pin, lat, lng FROM parcels WHERE lat IS NOT NULL AND lng IS NOT NULL"
+            "SELECT pin, address, lat, lng FROM parcels"
         ).fetchall()]
     finally:
         conn.close()
     if not parcels:
         return n
 
-    matches = match_records_to_parcels(raw_rows, parcels, MATCH_RADIUS_FT)
+    matches, _fuzzy = match_records_to_parcels_with_address(
+        raw_rows, parcels,
+        get_record_address=_record_address,
+        geo_radius_ft=DEFAULT_GEO_RADIUS_FT,
+    )
     latest: dict[str, str] = {}
-    for idx, pin in matches.items():
+    for idx, (pin, _method) in matches.items():
         r = raw_rows[idx]
         if not r["issue_date"]:
             continue

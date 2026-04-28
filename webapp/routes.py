@@ -91,6 +91,33 @@ def register(app: Flask) -> None:
             ]
             parcel["contacts"] = contacts
 
+            # Attach consolidation-group totals when this parcel belongs
+            # to a same-owner adjacent group.
+            gid = parcel.get("consolidation_group_id")
+            if gid is not None:
+                grp = conn.execute(
+                    "SELECT pins, combined_lot_size_sf, combined_building_sf, owner_name "
+                    "FROM consolidation_groups WHERE group_id = ?",
+                    (gid,),
+                ).fetchone()
+                parcel["consolidation_group"] = dict(grp) if grp else None
+
+            # Attach building-SF candidate values from each source so the UI
+            # can show 'assessor sum vs largest vs footprint' side-by-side
+            # for spot-checking the merge rule on contested parcels.
+            chars = conn.execute(
+                "SELECT char_bldg_sf, char_bldg_sf_sum, year "
+                "FROM raw_assessor_characteristics WHERE pin = ? "
+                "ORDER BY year DESC LIMIT 1",
+                (pin,),
+            ).fetchone()
+            parcel["bldg_sf_sources"] = {
+                "assessor_largest": chars["char_bldg_sf"] if chars else None,
+                "assessor_sum": chars["char_bldg_sf_sum"] if chars else None,
+                "current": parcel.get("building_sf"),
+                "current_source": parcel.get("building_sf_source"),
+            }
+
         parcel["google_maps_url"] = _google_maps_url(parcel)
         return jsonify(parcel)
 
@@ -188,8 +215,7 @@ def _parse_filters(args) -> dict[str, Any]:
         if value.lower() in {"true", "1"}:
             filters[key] = True
         elif value.lower() in {"false", "0"}:
-            # Omit — we don't filter "must be false" for checkboxes
-            continue
+            filters[key] = False
         else:
             filters[key] = value
 

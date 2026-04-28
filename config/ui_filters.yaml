@@ -60,11 +60,20 @@ filter_groups:
       - column: building_sf
         label: Building (SF)
         type: range
+      - column: unit_count
+        label: Unit count (footprint)
+        type: range
       - column: year_built
         label: Year built
         type: range
       - column: condition
         label: Condition
+        type: dropdown
+      - column: building_sf_source
+        label: Building SF source
+        type: dropdown
+      - column: condition_source
+        label: Condition source
         type: dropdown
 
   - group: Zoning
@@ -79,7 +88,10 @@ filter_groups:
         label: Max FAR (by-right)
         type: range
       - column: far_gap
-        label: FAR gap
+        label: FAR gap (×)
+        type: range
+      - column: far_gap_delta
+        label: FAR gap (Δ available)
         type: range
       - column: min_lot_area_per_unit
         label: Min lot area / unit (sf)
@@ -96,6 +108,18 @@ filter_groups:
       - column: tax_delinquent
         label: Tax delinquent
         type: checkbox
+      - column: is_scofflaw
+        label: On scofflaw list
+        type: checkbox
+      - column: scofflaw_appearances_count
+        label: Scofflaw appearances
+        type: range
+      - column: vacant_violations_count
+        label: Vacant-bldg violations
+        type: range
+      - column: vacant_violations_amount_due
+        label: Vacant-bldg fines due ($)
+        type: range
       - column: open_violations_count
         label: Open violations (min)
         type: range

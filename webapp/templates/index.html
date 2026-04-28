@@ -30,6 +30,11 @@
       <span class="count-label" id="count-label">— of —</span>
     </div>
     <div class="filter-row" id="stage-pills"></div>
+    <div class="search-row" style="padding: 8px 16px; border-bottom:1px solid #30363d;">
+      <input type="search" id="address-search" placeholder="Search address…"
+             aria-label="Search address"
+             style="width:100%; background:#0d1117; color:#c9d1d9; border:1px solid #30363d; border-radius:4px; padding:6px 8px; font-size:12px;" />
+    </div>
     <div class="sort-row" style="padding: 8px 16px; display:flex; gap:6px; align-items:center; border-bottom:1px solid #30363d;">
       <label for="sort-by" style="color:#8b949e; font-size:11px; flex:0 0 auto;">Sort:</label>
       <select id="sort-by" style="flex:1; background:#0d1117; color:#c9d1d9; border:1px solid #30363d; border-radius:4px; padding:4px;">
@@ -43,7 +48,8 @@
         <option value="last_sale_date">Last sale date</option>
         <option value="building_sf">Building SF</option>
         <option value="max_far">Max FAR (by-right)</option>
-        <option value="far_gap">FAR gap</option>
+        <option value="far_gap">FAR gap (×)</option>
+        <option value="far_gap_delta">FAR gap (Δ available)</option>
         <option value="max_units_allowed">Max units allowed</option>
         <option value="min_lot_area_per_unit">Min lot area / unit</option>
         <option value="open_violations_count">Open violations</option>
@@ -84,12 +90,14 @@
   <main class="center-panel">
     <div id="map"></div>
     <div class="layer-toggles">
+      <h3>Basemap</h3>
+      <label class="layer-toggle"><input type="radio" name="basemap" value="dark" checked> Dark</label>
+      <label class="layer-toggle" style="margin-bottom:10px;"><input type="radio" name="basemap" value="satellite"> Satellite</label>
       <h3>Layers</h3>
       <label class="layer-toggle"><input type="checkbox" checked data-layer="top"> <span class="layer-dot" style="background:#238636" aria-hidden="true"></span> Top-N scored</label>
       <label class="layer-toggle"><input type="checkbox" checked data-layer="consolidated"> <span class="layer-dot" style="background:#a855f7" aria-hidden="true"></span> Consolidated</label>
       <label class="layer-toggle"><input type="checkbox" checked data-layer="outreach"> <span class="layer-dot" style="background:#58a6ff" aria-hidden="true"></span> Outreach sent</label>
-      <label class="layer-toggle"><input type="checkbox" checked data-layer="listed"> <span class="layer-dot" style="background:#f0883e" aria-hidden="true"></span> Listed</label>
-      <label class="layer-toggle"><input type="checkbox" checked data-layer="other"> <span class="layer-dot" style="background:#484f58" aria-hidden="true"></span> All others</label>
+      <label class="layer-toggle"><input type="checkbox" checked data-layer="other"> <span class="layer-dot" style="background:#f85149" aria-hidden="true"></span> All others</label>
     </div>
   </main>
 

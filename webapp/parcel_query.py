@@ -6,7 +6,8 @@ from typing import Any
 ALLOWED_FILTER_COLUMNS = {
     "score", "is_absentee", "is_llc", "owner_name", "address",
     "property_class", "lot_size_sf", "building_sf", "year_built", "condition",
-    "zone_class", "allows_multifamily_by_right", "far_gap", "tif_district",
+    "zone_class", "allows_multifamily_by_right", "far_gap", "far_gap_delta",
+    "tif_district",
     "max_far", "min_lot_area_per_unit", "max_units_allowed",
     "tax_delinquent", "open_violations_count", "oldest_violation_age_days",
     "has_vacancy_report", "years_since_last_permit", "hold_duration_years",
@@ -15,6 +16,10 @@ ALLOWED_FILTER_COLUMNS = {
     "tax_increase_pct_5yr", "last_sale_price", "last_sale_date",
     "ward_num", "cta_distance_ft",
     "is_condo_building", "condo_unit_count",
+    # Added 2026-04-27 with footprints + scofflaw + vacant-violation sources
+    "unit_count", "is_scofflaw", "scofflaw_appearances_count",
+    "vacant_violations_count", "vacant_violations_amount_due",
+    "building_sf_source", "condition_source",
 }
 
 ALLOWED_STAGES = {"scored", "outreach", "responded", "introduced", "dead"}
@@ -26,11 +31,13 @@ ALLOWED_SORT_COLUMNS = {
     "tax_increase_pct_5yr", "land_building_ratio",
     "open_violations_count", "years_since_last_permit",
     "appeal_count", "oldest_violation_age_days",
-    "condo_unit_count", "far_gap",
+    "condo_unit_count", "far_gap", "far_gap_delta",
     "max_far", "min_lot_area_per_unit", "max_units_allowed",
     "last_sale_price", "last_sale_date",
     "building_sf", "cta_distance_ft",
     "address", "owner_name",
+    "unit_count", "scofflaw_appearances_count",
+    "vacant_violations_count", "vacant_violations_amount_due",
 }
 
 DEFAULT_ORDER_BY = (
@@ -67,7 +74,8 @@ def build_parcel_query(
         "year_built, zone_class, hold_duration_years, "
         "is_absentee, is_llc, tax_delinquent, open_violations_count, "
         "far_gap, stage, listing_status, score, consolidation_group_id, "
-        "is_condo_building, condo_unit_count "
+        "is_condo_building, condo_unit_count, "
+        "unit_count, is_scofflaw, vacant_violations_count "
         f"FROM parcels {where_sql} "
         f"ORDER BY {order_by} "
         f"LIMIT {int(limit)} OFFSET {int(offset)}"
@@ -103,9 +111,8 @@ def _build_where(
             raise ValueError(f"unknown column: {col!r}")
 
         if isinstance(value, bool):
-            # checkbox: only filter when checked (True -> col = 1)
-            if value:
-                clauses.append(f"{col} = 1")
+            # tri-state: True -> col = 1, False -> col = 0, absent -> no filter
+            clauses.append(f"{col} = {1 if value else 0}")
         elif isinstance(value, dict):
             # range: {"min": x, "max": y}  -- either may be absent
             mn = value.get("min")

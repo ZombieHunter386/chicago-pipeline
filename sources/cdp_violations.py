@@ -7,20 +7,34 @@ from pipeline.config import GeographyConfig
 from pipeline.db import upsert_rows, get_connection
 from pipeline.geography import filter_by_polygon, bbox_where_clause
 from pipeline.socrata import SocrataClient
-from pipeline.spatial import match_records_to_parcels
+from pipeline.spatial import (
+    DEFAULT_GEO_RADIUS_FT,
+    match_records_to_parcels_with_address,
+)
 
 
 DATASET_ID = "22u3-xenr"
 TABLE = "raw_cdp_violations"
 SOURCE_NAME = "cdp_violations"
 TODAY = date.today()
-MATCH_RADIUS_FT = 50.0
 
 
 def _f(v):
     if v in (None, ""): return None
     try: return float(v)
     except (TypeError, ValueError): return None
+
+
+def _record_address(r: dict) -> str | None:
+    parts = [
+        (r.get("street_number") or "").strip(),
+        (r.get("street_direction") or "").strip(),
+        (r.get("street_name") or "").strip(),
+    ]
+    parts = [p for p in parts if p]
+    if parts:
+        return " ".join(parts)
+    return r.get("address")
 
 
 def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient) -> int:
@@ -53,7 +67,7 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient) -> int:
     conn = get_connection(db_path)
     try:
         parcels = [dict(p) for p in conn.execute(
-            "SELECT pin, lat, lng FROM parcels WHERE lat IS NOT NULL AND lng IS NOT NULL"
+            "SELECT pin, address, lat, lng FROM parcels"
         ).fetchall()]
     finally:
         conn.close()
@@ -66,10 +80,14 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient) -> int:
         i for i, r in enumerate(raw_rows)
         if (r.get("violation_status") or "").upper().startswith("OPEN")
     }
-    matches = match_records_to_parcels(raw_rows, parcels, MATCH_RADIUS_FT)
+    matches, _fuzzy = match_records_to_parcels_with_address(
+        raw_rows, parcels,
+        get_record_address=_record_address,
+        geo_radius_ft=DEFAULT_GEO_RADIUS_FT,
+    )
     open_count: dict[str, int] = defaultdict(int)
     oldest_open: dict[str, str] = {}
-    for idx, pin in matches.items():
+    for idx, (pin, _method) in matches.items():
         if idx not in open_indices:
             continue
         r = raw_rows[idx]

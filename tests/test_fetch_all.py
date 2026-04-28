@@ -13,6 +13,7 @@ def _register_all(monkeypatch):
         assessor_values, assessor_sales, assessor_appeals, assessor_exempt,
         ccgis_parcels,
         cdp_zoning, cdp_permits, cdp_violations, cdp_vacant, cdp_cta_stations,
+        cdp_scofflaw, cdp_vacant_violations, cdp_building_footprints,
     )
     from sources.assessor_sales import TODAY as _    # just to ensure import
     monkeypatch.setattr(cdp_permits, "TODAY", date(2026, 4, 19))
@@ -38,7 +39,10 @@ def _register_all(monkeypatch):
         (cdp_permits.DATASET_ID, "cdp_permits.json"),
         (cdp_violations.DATASET_ID, "cdp_violations.json"),
         (cdp_vacant.DATASET_ID, "cdp_vacant.json"),
+        (cdp_scofflaw.DATASET_ID, "cdp_scofflaw.json"),
+        (cdp_vacant_violations.DATASET_ID, "cdp_vacant_violations.json"),
         (cdp_cta_stations.DATASET_ID, "cdp_cta_stations.json"),
+        (cdp_building_footprints.DATASET_ID, "cdp_building_footprints.json"),
     ]:
         fx = json.loads((FIXTURES / fname).read_text())
         responses.add(responses.GET, f"{cdp}/{ds}.json", json=fx, status=200)

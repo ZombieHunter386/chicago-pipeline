@@ -42,6 +42,11 @@
   .filter-control { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-size: 11px; color: #c9d1d9; }
   .filter-control:last-child { margin-bottom: 0; }
   .filter-checkbox { width: 14px; height: 14px; accent-color: #1f6feb; cursor: pointer; }
+  .tristate-group { display: inline-flex; border: 1px solid #30363d; border-radius: 4px; overflow: hidden; }
+  .tristate-btn { background: #161b22; color: #8b949e; border: none; border-right: 1px solid #30363d; padding: 4px 12px; font-size: 11px; cursor: pointer; }
+  .tristate-btn:last-child { border-right: none; }
+  .tristate-btn:hover { color: #c9d1d9; }
+  .tristate-btn.active { background: #1f6feb33; color: #58a6ff; }
   .filter-range { display: flex; align-items: center; gap: 6px; }
   .filter-input { width: 60px; background: #161b22; border: 1px solid #30363d; border-radius: 4px; padding: 3px 6px; font-size: 11px; color: #f0f6fc; }
   .filter-input:focus { border-color: #1f6feb; outline: none; }

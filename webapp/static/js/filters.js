@@ -76,17 +76,36 @@ function renderFilter(f) {
   const labelText = escapeHtml(f.label);
 
   if (f.type === 'checkbox') {
-    const cbId = `filter-${colAttr}-checkbox`;
+    ctrl.style.flexDirection = 'column';
+    ctrl.style.alignItems = 'flex-start';
+    ctrl.style.gap = '4px';
+    const groupId = `filter-${colAttr}-tristate`;
+    const groupLabel = `${labelText}: any, yes, or no`;
     ctrl.innerHTML = `
-      <input type="checkbox" id="${cbId}" class="filter-checkbox" data-col="${colAttr}">
-      <label for="${cbId}">${labelText}</label>
+      <label id="${groupId}-label" style="font-size:11px; color:#c9d1d9;">${labelText}</label>
+      <div role="radiogroup" aria-labelledby="${groupId}-label" class="tristate-group" data-col="${colAttr}">
+        <button type="button" class="tristate-btn active" data-value="" aria-pressed="true">Any</button>
+        <button type="button" class="tristate-btn" data-value="true" aria-pressed="false">Yes</button>
+        <button type="button" class="tristate-btn" data-value="false" aria-pressed="false">No</button>
+      </div>
     `;
-    ctrl.querySelector('input').onchange = (e) => {
-      if (e.target.checked) window.FilterState.filters[col] = true;
-      else delete window.FilterState.filters[col];
-      updateActiveCount();
-      window.dispatchEvent(new CustomEvent('filterchange'));
-    };
+    const buttons = ctrl.querySelectorAll('.tristate-btn');
+    buttons.forEach(btn => {
+      btn.onclick = () => {
+        buttons.forEach(b => {
+          b.classList.remove('active');
+          b.setAttribute('aria-pressed', 'false');
+        });
+        btn.classList.add('active');
+        btn.setAttribute('aria-pressed', 'true');
+        const v = btn.dataset.value;
+        if (v === 'true') window.FilterState.filters[col] = true;
+        else if (v === 'false') window.FilterState.filters[col] = false;
+        else delete window.FilterState.filters[col];
+        updateActiveCount();
+        window.dispatchEvent(new CustomEvent('filterchange'));
+      };
+    });
   } else if (f.type === 'range') {
     ctrl.style.flexDirection = 'column';
     ctrl.style.alignItems = 'flex-start';
@@ -196,10 +215,16 @@ function wireFilterToggle() {
   };
   document.getElementById('clear-filters').onclick = () => {
     window.FilterState.filters = {};
-    // Reset all inputs
     panel.querySelectorAll('input[type="checkbox"]').forEach(i => i.checked = false);
     panel.querySelectorAll('input[type="number"], input[type="text"]').forEach(i => i.value = '');
     panel.querySelectorAll('select').forEach(s => s.value = '');
+    panel.querySelectorAll('.tristate-group').forEach(g => {
+      g.querySelectorAll('.tristate-btn').forEach(b => {
+        const isAny = b.dataset.value === '';
+        b.classList.toggle('active', isAny);
+        b.setAttribute('aria-pressed', isAny ? 'true' : 'false');
+      });
+    });
     updateActiveCount();
     window.dispatchEvent(new CustomEvent('filterchange'));
   };
@@ -210,6 +235,7 @@ window.filterStateToQuery = function() {
   const params = new URLSearchParams();
   for (const [col, val] of Object.entries(window.FilterState.filters)) {
     if (val === true) params.set(col, 'true');
+    else if (val === false) params.set(col, 'false');
     else if (typeof val === 'object') {
       if (val.min != null) params.set(`${col}.min`, val.min);
       if (val.max != null) params.set(`${col}.max`, val.max);

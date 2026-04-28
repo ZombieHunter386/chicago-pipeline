@@ -1,0 +1,53 @@
+[
+  {"bldg_id": "FP-MAIN-10",
+   "bldg_statu": "ACTIVE",
+   "bldg_sq_fo": "2500", "shape_area": "400",
+   "stories": "3", "no_of_unit": "4",
+   "year_built": "1920", "bldg_condi": "NEEDS MINOR REPAIR",
+   "edit_date": "2014-06-01T00:00:00.000",
+   "the_geom": {"type": "MultiPolygon", "coordinates": [[[
+     [-87.6502, 41.9402], [-87.6498, 41.9402], [-87.6498, 41.9398],
+     [-87.6502, 41.9398], [-87.6502, 41.9402]
+   ]]]}},
+  {"bldg_id": "FP-GARAGE-10",
+   "bldg_statu": "ACTIVE",
+   "bldg_sq_fo": "200", "shape_area": "200",
+   "stories": "1", "no_of_unit": "0",
+   "year_built": "1980", "bldg_condi": "SOUND",
+   "edit_date": "2014-06-01T00:00:00.000",
+   "the_geom": {"type": "MultiPolygon", "coordinates": [[[
+     [-87.6502, 41.9405], [-87.6498, 41.9405], [-87.6498, 41.9403],
+     [-87.6502, 41.9403], [-87.6502, 41.9405]
+   ]]]}},
+  {"bldg_id": "FP-MAIN-20",
+   "bldg_statu": "ACTIVE",
+   "bldg_sq_fo": "4000", "shape_area": "300",
+   "stories": "4", "no_of_unit": "8",
+   "year_built": "0", "bldg_condi": "SOUND",
+   "edit_date": "2014-06-01T00:00:00.000",
+   "the_geom": {"type": "MultiPolygon", "coordinates": [[[
+     [-87.6602, 41.9302], [-87.6598, 41.9302], [-87.6598, 41.9298],
+     [-87.6602, 41.9298], [-87.6602, 41.9302]
+   ]]]}},
+  {"bldg_id": "FP-MAIN-30",
+   "bldg_statu": "ACTIVE",
+   "bldg_sq_fo": "4500", "shape_area": "500",
+   "stories": "3", "no_of_unit": "6",
+   "year_built": "1900", "bldg_condi": "SOUND",
+   "edit_date": "2014-06-01T00:00:00.000",
+   "the_geom": {"type": "MultiPolygon", "coordinates": [[[
+     [-87.6502, 41.9302], [-87.6498, 41.9302], [-87.6498, 41.9298],
+     [-87.6502, 41.9298], [-87.6502, 41.9302]
+   ]]]}},
+  {"bldg_id": "FP-DEMOLISHED",
+   "bldg_statu": "DEMOLISHED",
+   "bldg_sq_fo": "9999", "shape_area": "9999",
+   "stories": "5", "no_of_unit": "20",
+   "year_built": "1900", "bldg_condi": "UNINHABITABLE",
+   "demolished": "2018-01-01T00:00:00.000",
+   "edit_date": "2014-06-01T00:00:00.000",
+   "the_geom": {"type": "MultiPolygon", "coordinates": [[[
+     [-87.6502, 41.9402], [-87.6498, 41.9402], [-87.6498, 41.9398],
+     [-87.6502, 41.9398], [-87.6502, 41.9402]
+   ]]]}}
+]

@@ -9,10 +9,10 @@ def _seed(db_path, rows):
     try:
         for r in rows:
             conn.execute("""
-                INSERT INTO parcels (pin, lat, lng, lot_size_sf, owner_name, mail_address,
+                INSERT INTO parcels (pin, lat, lng, lot_size_sf, building_sf, owner_name, mail_address,
                                      first_seen_date, last_fetched_date, last_updated_date, stage)
-                VALUES (:pin, :lat, :lng, :lot, :owner, :mail, '2026-04-19', '2026-04-19', '2026-04-19', 'scored')
-            """, r)
+                VALUES (:pin, :lat, :lng, :lot, :bsf, :owner, :mail, '2026-04-19', '2026-04-19', '2026-04-19', 'scored')
+            """, {**r, "bsf": r.get("bsf")})
         conn.commit()
     finally:
         conn.close()
@@ -20,25 +20,29 @@ def _seed(db_path, rows):
 
 def test_consolidate_groups_same_owner_adjacent(db_path):
     _seed(db_path, [
-        {"pin": "P1", "lat": 41.9400, "lng": -87.6500, "lot": 3000,
+        {"pin": "P1", "lat": 41.9400, "lng": -87.6500, "lot": 3000, "bsf": 2400,
          "owner": "ACME LLC", "mail": "100 Main St"},
-        {"pin": "P2", "lat": 41.9401, "lng": -87.6501, "lot": 3000,
+        {"pin": "P2", "lat": 41.9401, "lng": -87.6501, "lot": 3000, "bsf": 1800,
          "owner": "ACME LLC", "mail": "100 Main St"},
-        {"pin": "P3", "lat": 41.9500, "lng": -87.6300, "lot": 3000,
+        {"pin": "P3", "lat": 41.9500, "lng": -87.6300, "lot": 3000, "bsf": 2000,
          "owner": "ACME LLC", "mail": "100 Main St"},   # same owner but far
-        {"pin": "P4", "lat": 41.9402, "lng": -87.6502, "lot": 3000,
+        {"pin": "P4", "lat": 41.9402, "lng": -87.6502, "lot": 3000, "bsf": 5000,
          "owner": "OTHER LLC", "mail": "200 Main St"},  # different owner
     ])
     n_groups = consolidate(db_path)
     assert n_groups == 1
 
     conn = get_connection(db_path)
-    groups = conn.execute("SELECT group_id, pins, combined_lot_size_sf, owner_name FROM consolidation_groups").fetchall()
+    groups = conn.execute(
+        "SELECT group_id, pins, combined_lot_size_sf, combined_building_sf, owner_name "
+        "FROM consolidation_groups"
+    ).fetchall()
     assert len(groups) == 1
     g = groups[0]
     pins = sorted(json.loads(g["pins"]))
     assert pins == ["P1", "P2"]
     assert g["combined_lot_size_sf"] == 6000
+    assert g["combined_building_sf"] == 4200  # 2400 + 1800
     assert g["owner_name"] == "ACME LLC"
 
     links = conn.execute("""
