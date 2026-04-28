@@ -1,6 +1,7 @@
 """Tests for pipeline/score.py — applies weights from config/scoring.yaml
 to the parcels table to produce a 0-100 score per parcel."""
 from datetime import datetime, UTC
+from pathlib import Path
 
 import yaml
 
@@ -322,3 +323,67 @@ def test_score_parcels_handles_empty_db(tmp_path):
     init_db(db_path)
     cfg = score.ScoringConfig(version="1.0.0-test", top_n=20, signals=[])
     assert score.score_parcels(db_path, cfg) == 0
+
+
+def test_score_orchestrator_writes_scores(tmp_path):
+    parcels = [{"pin": "14210010010000", "lot_size_sf": 5000.0}]
+    db_path = _build_score_db(tmp_path, parcels)
+    yaml_path = tmp_path / "scoring.yaml"
+    _write_yaml(yaml_path, {
+        "version": "1.0.0-test",
+        "generated_at": "2026-04-28T12:00:00+00:00",
+        "top_n": 20,
+        "signals": {
+            "lot_size_sf": {"kind": "continuous", "weight": 1.0,
+                            "direction": "positive",
+                            "normalization": {"min": 0.0, "max": 10000.0},
+                            "insignificant": False},
+        },
+    })
+    score.score(db_path=db_path, scoring_yaml_path=yaml_path)
+
+    from pipeline.db import get_connection
+    conn = get_connection(db_path)
+    try:
+        row = dict(conn.execute(
+            "SELECT score, score_version FROM parcels WHERE pin='14210010010000'"
+        ).fetchone())
+    finally:
+        conn.close()
+    # 5000 / 10000 * 100 = 50
+    assert row["score"] == 50.0
+    assert row["score_version"] == "1.0.0-test"
+
+
+def test_cli_runs_score_against_synthetic_db(tmp_path):
+    import subprocess, sys
+    parcels = [{"pin": "14210010010000", "lot_size_sf": 5000.0}]
+    db_path = _build_score_db(tmp_path, parcels)
+    yaml_path = tmp_path / "scoring.yaml"
+    _write_yaml(yaml_path, {
+        "version": "1.0.0-cli-test",
+        "generated_at": "2026-04-28T12:00:00+00:00",
+        "top_n": 20,
+        "signals": {
+            "lot_size_sf": {"kind": "continuous", "weight": 1.0,
+                            "direction": "positive",
+                            "normalization": {"min": 0.0, "max": 10000.0},
+                            "insignificant": False},
+        },
+    })
+    result = subprocess.run([
+        sys.executable, "-m", "pipeline.score",
+        "--db", str(db_path),
+        "--scoring-yaml", str(yaml_path),
+    ], capture_output=True, text=True,
+       cwd=str(Path(__file__).resolve().parent.parent))
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    from pipeline.db import get_connection
+    conn = get_connection(db_path)
+    try:
+        version = conn.execute(
+            "SELECT score_version FROM parcels WHERE pin='14210010010000'"
+        ).fetchone()["score_version"]
+    finally:
+        conn.close()
+    assert version == "1.0.0-cli-test"

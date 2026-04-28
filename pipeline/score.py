@@ -155,5 +155,24 @@ def score_parcels(db_path: Path, scoring_config: ScoringConfig) -> int:
 
 
 def score(db_path: Path, scoring_yaml_path: Path) -> None:
-    """Orchestrator — filled in by Task 6."""
-    raise NotImplementedError("Implemented in Task 6")
+    """Orchestrate: load config + score every parcel in the DB."""
+    cfg = load_scoring_config(scoring_yaml_path)
+    n = score_parcels(db_path, cfg)
+    print(f"Scored {n:,} parcels with version {cfg.version}")
+
+
+def _cli(argv: list[str] | None = None) -> int:
+    import argparse
+    p = argparse.ArgumentParser(prog="pipeline.score",
+                                description="Apply scoring weights to every parcel.")
+    p.add_argument("--db", required=True, type=Path,
+                   help="Path to the SQLite DB (e.g. data/full.db).")
+    p.add_argument("--scoring-yaml", required=True, type=Path,
+                   help="Path to config/scoring.yaml.")
+    args = p.parse_args(argv)
+    score(db_path=args.db, scoring_yaml_path=args.scoring_yaml)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_cli())
