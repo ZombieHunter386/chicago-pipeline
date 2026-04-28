@@ -63,8 +63,33 @@ def load_scoring_config(path: Path) -> ScoringConfig:
 
 def normalize_signal(raw_value: float | int | None,
                      signal_config: SignalConfig) -> float:
-    """Filled in by Task 3."""
-    raise NotImplementedError("Implemented in Task 3")
+    """Return the raw value normalized to [0, 1] for the given signal.
+
+    Continuous: linear rescale by the (min, max) range, clipped at the bounds.
+    Binary: cast to float (0.0 or 1.0).
+    NULL: 0.5 for continuous (neutral), 0.0 for binary (not-flagged).
+    Degenerate range (min == max): 0.5 (avoids divide-by-zero on insignificant
+        signals that were 100% imputed during Analyze).
+
+    Direction is NOT applied here — score_parcel handles the flip.
+    """
+    if signal_config.kind == "binary":
+        if raw_value is None:
+            return 0.0
+        return float(bool(raw_value))
+
+    # Continuous
+    if raw_value is None:
+        return 0.5
+    lo = signal_config.normalization_min
+    hi = signal_config.normalization_max
+    if hi == lo:
+        return 0.5
+    if raw_value <= lo:
+        return 0.0
+    if raw_value >= hi:
+        return 1.0
+    return (float(raw_value) - lo) / (hi - lo)
 
 
 def score_parcel(parcel_row: dict, scoring_config: ScoringConfig) -> float:

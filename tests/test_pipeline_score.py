@@ -67,3 +67,65 @@ def test_load_scoring_config_raises_on_missing_required_field(tmp_path):
     import pytest
     with pytest.raises(KeyError, match="signals"):
         score.load_scoring_config(yaml_path)
+
+
+def _continuous_cfg(min_=0.0, max_=100.0, insignificant=False):
+    return score.SignalConfig(
+        signal="test", kind="continuous", weight=0.5, direction="positive",
+        normalization_min=min_, normalization_max=max_,
+        insignificant=insignificant,
+    )
+
+
+def _binary_cfg(insignificant=False):
+    return score.SignalConfig(
+        signal="test", kind="binary", weight=0.5, direction="positive",
+        normalization_min=0.0, normalization_max=1.0,
+        insignificant=insignificant,
+    )
+
+
+def test_normalize_continuous_in_range():
+    cfg = _continuous_cfg(min_=1500.0, max_=12000.0)
+    # Halfway between min and max → 0.5
+    assert score.normalize_signal(6750.0, cfg) == 0.5
+    # Quarter point
+    assert score.normalize_signal(4125.0, cfg) == 0.25
+
+
+def test_normalize_continuous_clips_above_max():
+    cfg = _continuous_cfg(min_=1500.0, max_=12000.0)
+    assert score.normalize_signal(50000.0, cfg) == 1.0
+
+
+def test_normalize_continuous_clips_below_min():
+    cfg = _continuous_cfg(min_=1500.0, max_=12000.0)
+    assert score.normalize_signal(100.0, cfg) == 0.0
+
+
+def test_normalize_continuous_null_returns_neutral():
+    cfg = _continuous_cfg(min_=1500.0, max_=12000.0)
+    assert score.normalize_signal(None, cfg) == 0.5
+
+
+def test_normalize_continuous_degenerate_range_returns_neutral():
+    """When min == max (signal was 100% imputed during Analyze), return 0.5
+    instead of dividing by zero. These signals are insignificant anyway, so
+    contribution will be zero — but normalize must not crash."""
+    cfg = _continuous_cfg(min_=7.62, max_=7.62, insignificant=True)
+    assert score.normalize_signal(7.62, cfg) == 0.5
+    assert score.normalize_signal(0.0, cfg) == 0.5
+    assert score.normalize_signal(None, cfg) == 0.5
+
+
+def test_normalize_binary_value():
+    cfg = _binary_cfg()
+    assert score.normalize_signal(1, cfg) == 1.0
+    assert score.normalize_signal(0, cfg) == 0.0
+
+
+def test_normalize_binary_null_returns_zero():
+    """Binary NULL means 'not flagged' — contributes 0, not 0.5 (which
+    would inflate the score for unflagged parcels)."""
+    cfg = _binary_cfg()
+    assert score.normalize_signal(None, cfg) == 0.0
