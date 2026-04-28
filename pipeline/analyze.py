@@ -8,6 +8,8 @@ emits config/scoring.yaml + a markdown analysis report.
 from __future__ import annotations
 from pathlib import Path
 
+import pandas as pd
+
 from pipeline.config import GeographyConfig
 from pipeline.db import get_connection
 from pipeline.spatial import (
@@ -56,6 +58,12 @@ def _is_qualifying_permit(permit_type: str | None) -> bool:
         return False
     pt = permit_type.strip().upper()
     return any(pt.startswith(p) for p in QUALIFYING_PERMIT_PREFIXES)
+
+
+def _is_pd_zone(zone_class: str | None) -> bool:
+    if not zone_class:
+        return False
+    return zone_class.strip().upper().startswith("PD")
 
 
 def _permit_record_address(r: dict) -> str | None:
@@ -110,6 +118,78 @@ def identify_positive_examples(db_path: Path) -> dict[str, int]:
         if pin not in earliest or year < earliest[pin]:
             earliest[pin] = year
     return earliest
+
+
+def build_training_table(
+    db_path: Path,
+    positive_pins: dict[str, int],
+) -> pd.DataFrame:
+    """Assemble one (features, label) row per eligible parcel.
+
+    Eligibility filter (in this order):
+      1. has zone_class
+      2. zone_class is not PD/PMD (no max_far ordinance available)
+      3. is_condo_unit = 0  (units excluded; building reps kept)
+      4. PIN not in raw_assessor_exempt
+
+    NULL handling after eligibility:
+      - continuous: fill with training-set median
+      - binary: fill with 0
+
+    Imputation rates are attached to df.attrs['imputation_rates'] for the
+    report writer.
+    """
+    columns = [s[0] for s in SIGNALS]
+    select_cols = ["pin", "zone_class", "is_condo_unit"] + columns
+    placeholders = ", ".join(select_cols)
+    conn = get_connection(db_path)
+    try:
+        rows = [dict(r) for r in conn.execute(
+            f"SELECT {placeholders} FROM parcels"
+        ).fetchall()]
+        exempt_pins = {
+            r["pin"] for r in conn.execute(
+                "SELECT pin FROM raw_assessor_exempt"
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+
+    eligible = []
+    for r in rows:
+        if not r["zone_class"]:
+            continue
+        if _is_pd_zone(r["zone_class"]):
+            continue
+        if r["is_condo_unit"]:
+            continue
+        if r["pin"] in exempt_pins:
+            continue
+        eligible.append(r)
+
+    if not eligible:
+        df = pd.DataFrame(columns=["pin", "label"] + columns)
+        df.attrs["imputation_rates"] = {}
+        return df
+
+    df = pd.DataFrame(eligible)[["pin"] + columns].copy()
+    df["label"] = df["pin"].isin(positive_pins).astype(int)
+
+    imputation_rates: dict[str, dict[str, float]] = {}
+    n = len(df)
+    for col, kind, _src in SIGNALS:
+        nulls = df[col].isna().sum()
+        pct = round(100.0 * nulls / n, 1) if n else 0.0
+        imputation_rates[col] = {"n_imputed": int(nulls), "pct": pct}
+        if kind == "continuous":
+            median = df[col].median()
+            # If every value is NULL, fall back to 0 — flagged in report.
+            df[col] = df[col].fillna(0 if pd.isna(median) else median)
+        else:  # binary
+            df[col] = df[col].fillna(0).astype(int)
+
+    df.attrs["imputation_rates"] = imputation_rates
+    return df
 
 
 def analyze(

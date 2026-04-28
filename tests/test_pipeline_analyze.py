@@ -3,6 +3,8 @@ initial scoring weights from permit history."""
 from pathlib import Path
 from datetime import datetime, UTC
 
+import pandas as pd
+
 from pipeline import analyze
 from pipeline.db import init_db, upsert_rows
 
@@ -138,3 +140,88 @@ def test_identify_positive_examples_returns_empty_when_no_qualifying_permits(tmp
     ]
     db_path = _build_analyze_db(tmp_path, parcels, permits)
     assert analyze.identify_positive_examples(db_path) == {}
+
+
+def _parcel_row(pin, **overrides):
+    """Helper: minimum-viable parcels row with sensible defaults so individual
+    tests only spell out the fields they care about."""
+    base = {
+        "pin": pin, "address": f"{pin[-4:]} W FAKE ST", "lat": 41.93, "lng": -87.65,
+        "lot_size_sf": 5000.0, "hold_duration_years": 10.0,
+        "max_far": 2.0, "far_gap_delta": 0.5, "land_building_ratio": 0.4,
+        "estimated_annual_tax": 12000.0, "tax_increase_pct_5yr": 15.0,
+        "cta_distance_ft": 2000.0, "appeal_count": 1, "open_violations_count": 0,
+        "years_since_last_permit": 5.0, "vacant_violations_count": 0,
+        "scofflaw_appearances_count": 0,
+        "is_absentee": 0, "is_llc": 0, "allows_multifamily_by_right": 1,
+        "is_scofflaw": 0, "is_condo_unit": 0, "zone_class": "RM-5",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_build_training_table_basic_shape(tmp_path):
+    parcels = [_parcel_row("14210010010000"), _parcel_row("14210010020000")]
+    db_path = _build_analyze_db(tmp_path, parcels)
+    positives = {"14210010010000": 2018}
+    df = analyze.build_training_table(db_path, positives)
+    assert len(df) == 2
+    assert "label" in df.columns
+    # Order isn't guaranteed; check by PIN.
+    by_pin = df.set_index("pin")
+    assert by_pin.loc["14210010010000", "label"] == 1
+    assert by_pin.loc["14210010020000", "label"] == 0
+    # Every signal column must be present.
+    for col, _kind, _src in analyze.SIGNALS:
+        assert col in df.columns
+
+
+def test_build_training_table_drops_tax_exempt(tmp_path):
+    parcels = [_parcel_row("14210010010000"), _parcel_row("14210010020000")]
+    exempt = [{"pin": "14210010020000", "exemption_type": "Religious"}]
+    db_path = _build_analyze_db(tmp_path, parcels, exempt=exempt)
+    df = analyze.build_training_table(db_path, positive_pins={})
+    assert df["pin"].tolist() == ["14210010010000"]
+
+
+def test_build_training_table_drops_pd_zoned(tmp_path):
+    parcels = [
+        _parcel_row("14210010010000", zone_class="RM-5"),
+        _parcel_row("14210010020000", zone_class="PD 555", max_far=None,
+                    allows_multifamily_by_right=None, far_gap_delta=None),
+    ]
+    db_path = _build_analyze_db(tmp_path, parcels)
+    df = analyze.build_training_table(db_path, positive_pins={})
+    assert df["pin"].tolist() == ["14210010010000"]
+
+
+def test_build_training_table_drops_condo_units_keeps_building_reps(tmp_path):
+    parcels = [
+        _parcel_row("14210010010000", is_condo_unit=0),
+        _parcel_row("14210010020000", is_condo_unit=1),
+    ]
+    db_path = _build_analyze_db(tmp_path, parcels)
+    df = analyze.build_training_table(db_path, positive_pins={})
+    assert df["pin"].tolist() == ["14210010010000"]
+
+
+def test_build_training_table_imputes_nulls(tmp_path):
+    """Continuous NULLs become the training-set median; binary NULLs become 0.
+    Imputed cells are tracked so the report can disclose the imputation rate."""
+    parcels = [
+        _parcel_row("14210010010000", lot_size_sf=4000.0, is_absentee=1),
+        _parcel_row("14210010020000", lot_size_sf=8000.0, is_absentee=None),
+        _parcel_row("14210010030000", lot_size_sf=None,    is_absentee=None),
+    ]
+    db_path = _build_analyze_db(tmp_path, parcels)
+    df = analyze.build_training_table(db_path, positive_pins={})
+    # Median of (4000, 8000) = 6000
+    by_pin = df.set_index("pin")
+    assert by_pin.loc["14210010030000", "lot_size_sf"] == 6000.0
+    # Binary NULLs go to 0
+    assert by_pin.loc["14210010020000", "is_absentee"] == 0
+    assert by_pin.loc["14210010030000", "is_absentee"] == 0
+    # Imputation rate exposed via attrs (consumed by the report writer)
+    rates = df.attrs["imputation_rates"]
+    assert rates["lot_size_sf"]["pct"] == round(100 / 3, 1)  # 1 of 3 imputed
+    assert rates["is_absentee"]["pct"] == round(200 / 3, 1)  # 2 of 3 imputed
