@@ -1,70 +1,70 @@
-version: 1.0.0-2026-04-28
-generated_at: '2026-04-28T21:19:51+00:00'
+version: 1.1.0-2026-04-29
+generated_at: '2026-04-29T00:21:45+00:00'
 top_n: 20
 signals:
   lot_size_sf:
-    weight: 0.0
-    kind: continuous
-    direction: positive
-    normalization:
-      min: 1657.0850206752589
-      max: 9547.672149926579
-    insignificant: true
-  hold_duration_years:
-    weight: 0.1489
+    weight: 0.3974
     kind: continuous
     direction: negative
     normalization:
-      min: 1.64
-      max: 23.49
+      min: 2088.795099414015
+      max: 117562.2500982736
+    insignificant: false
+  hold_duration_years:
+    weight: 0.0941
+    kind: continuous
+    direction: negative
+    normalization:
+      min: 1.57
+      max: 23.4
     insignificant: false
   max_far:
-    weight: 0.0757
+    weight: 0.1575
     kind: continuous
     direction: negative
     normalization:
       min: 0.9
-      max: 3.0
+      max: 6.6
     insignificant: false
   far_gap_delta:
-    weight: 0.0205
+    weight: 0.0176
     kind: continuous
     direction: negative
     normalization:
-      min: -0.35792
-      max: 1.2676600000000002
+      min: -0.23642
+      max: 1.1112399999999987
     insignificant: false
   land_building_ratio:
-    weight: 0.0391
-    kind: continuous
-    direction: negative
-    normalization:
-      min: 0.11517175859700937
-      max: 0.9962261340218983
-    insignificant: false
-  estimated_annual_tax:
-    weight: 0.194
-    kind: continuous
-    direction: negative
-    normalization:
-      min: 6328.6720000000005
-      max: 194040.88600000035
-    insignificant: false
-  tax_increase_pct_5yr:
-    weight: 0.1606
-    kind: continuous
-    direction: negative
-    normalization:
-      min: -10.163950566052748
-      max: 176.78857142857143
-    insignificant: false
-  cta_distance_ft:
-    weight: 0.0337
+    weight: 0.0
     kind: continuous
     direction: positive
     normalization:
-      min: 515.38
-      max: 4323.22
+      min: 0.06050454297298041
+      max: 0.725104210312775
+    insignificant: true
+  estimated_annual_tax:
+    weight: 0.0186
+    kind: continuous
+    direction: positive
+    normalization:
+      min: 4188.52
+      max: 180503.79599999983
+    insignificant: false
+  tax_increase_pct_5yr:
+    weight: 0.0
+    kind: continuous
+    direction: positive
+    normalization:
+      min: -5.429197466270465
+      max: 145.47946747239726
+    insignificant: true
+  cta_distance_ft:
+    weight: 0.0129
+    kind: continuous
+    direction: positive
+    normalization:
+      min: 528.08
+      max: 4303.5
     insignificant: false
   appeal_count:
     weight: 0.0
@@ -72,12 +72,12 @@ signals:
     direction: positive
     normalization:
       min: 1.0
-      max: 6.0
+      max: 8.0
     insignificant: true
   open_violations_count:
     weight: 0.0
     kind: continuous
-    direction: negative
+    direction: positive
     normalization:
       min: 4.0
       max: 4.0
@@ -87,8 +87,8 @@ signals:
     kind: continuous
     direction: negative
     normalization:
-      min: 7.62
-      max: 7.62
+      min: 7.59
+      max: 7.59
     insignificant: true
   vacant_violations_count:
     weight: 0.0
@@ -107,7 +107,7 @@ signals:
       max: 0.0
     insignificant: true
   is_absentee:
-    weight: 0.0818
+    weight: 0.0606
     kind: binary
     direction: negative
     normalization:
@@ -115,7 +115,7 @@ signals:
       max: 1.0
     insignificant: false
   is_llc:
-    weight: 0.1533
+    weight: 0.169
     kind: binary
     direction: positive
     normalization:
@@ -123,7 +123,7 @@ signals:
       max: 1.0
     insignificant: false
   allows_multifamily_by_right:
-    weight: 0.0924
+    weight: 0.0722
     kind: binary
     direction: negative
     normalization:
