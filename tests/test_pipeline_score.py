@@ -429,6 +429,43 @@ def test_score_parcels_skips_individual_condo_units(tmp_path):
     assert rows["UNIT_2"] is None
 
 
+def test_score_parcels_clears_stale_scores_from_filtered_rows(tmp_path):
+    """Methodology change: a parcel that WAS scored under a prior methodology
+    but is now excluded by the eligibility filter (is_condo_unit=1) must have
+    its stale score CLEARED. Without this, downstream consumers can read old
+    scores tagged with a stale score_version."""
+    parcels = [
+        {"pin": "REGULAR", "lot_size_sf": 5000.0, "is_condo_unit": 0},
+        # Simulate a condo unit that received a score under the old methodology
+        # (pre-1.1.0, which didn't filter condo units).
+        {"pin": "STALE_CONDO", "lot_size_sf": 40000.0, "is_condo_unit": 1,
+         "score": 95.0, "score_version": "stale-old-version"},
+    ]
+    db_path = _build_score_db(tmp_path, parcels)
+    cfg = score.ScoringConfig(version="1.1.0-test", top_n=20, signals=[
+        score.SignalConfig(signal="lot_size_sf", kind="continuous",
+                           weight=1.0, direction="positive",
+                           normalization_min=0.0, normalization_max=10000.0,
+                           insignificant=False),
+    ])
+    score.score_parcels(db_path, cfg)
+    from pipeline.db import get_connection
+    conn = get_connection(db_path)
+    try:
+        rows = {r["pin"]: dict(r) for r in conn.execute(
+            "SELECT pin, score, score_version FROM parcels"
+        ).fetchall()}
+    finally:
+        conn.close()
+    # REGULAR gets the new score with the new version
+    assert rows["REGULAR"]["score"] is not None
+    assert rows["REGULAR"]["score_version"] == "1.1.0-test"
+    # STALE_CONDO must have its old score AND old version CLEARED, not
+    # silently retained from the prior methodology.
+    assert rows["STALE_CONDO"]["score"] is None
+    assert rows["STALE_CONDO"]["score_version"] is None
+
+
 import json as _json
 
 

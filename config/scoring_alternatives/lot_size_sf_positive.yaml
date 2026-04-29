@@ -1,0 +1,166 @@
+# Alternative scoring weights — lot_size_sf direction force-flipped to positive.
+#
+# Rationale: the canonical config/scoring.yaml has lot_size_sf with direction
+# "negative" (smaller lots score higher) because that's what the 2006-present
+# permit data trained on — most NEW CONSTRUCTION + WRECKING/DEMOLITION events
+# in LP/Lakeview happened on standard small residential lots (single-family
+# teardowns rebuilt as 2-4 unit multifamily). Consolidation groups, despite
+# being in the training set, mostly haven't redeveloped recently — so the
+# regression learned that big lots are *less* likely to redevelop.
+#
+# This alternative inverts that one signal. Use this YAML when you want the
+# score to surface large-lot redevelopment opportunities (assemble-then-build
+# pattern) instead of small-lot teardown opportunities. All other weights,
+# normalization ranges, and significance flags are unchanged from the
+# analysis-derived 1.1.0-2026-04-29 run.
+#
+# To use:
+#   .venv/bin/python -m pipeline.score \
+#       --db data/full.db \
+#       --scoring-yaml config/scoring_alternatives/lot_size_sf_positive.yaml
+#
+# This OVERWRITES parcels.score and consolidation_groups.score with the
+# new score_version. If you want to preserve the canonical scores, copy the
+# DB first (cp data/full.db data/full.alt.db) and score against the copy.
+
+version: 1.1.0-2026-04-29-lot-positive-flip
+generated_at: '2026-04-29T00:21:45+00:00'
+top_n: 20
+signals:
+  lot_size_sf:
+    # FLIPPED from negative to positive — manual override of the regression
+    weight: 0.3974
+    kind: continuous
+    direction: positive
+    normalization:
+      min: 2088.795099414015
+      max: 117562.2500982736
+    insignificant: false
+  hold_duration_years:
+    weight: 0.0941
+    kind: continuous
+    direction: negative
+    normalization:
+      min: 1.57
+      max: 23.4
+    insignificant: false
+  max_far:
+    weight: 0.1575
+    kind: continuous
+    direction: negative
+    normalization:
+      min: 0.9
+      max: 6.6
+    insignificant: false
+  far_gap_delta:
+    weight: 0.0176
+    kind: continuous
+    direction: negative
+    normalization:
+      min: -0.23642
+      max: 1.1112399999999987
+    insignificant: false
+  land_building_ratio:
+    weight: 0.0
+    kind: continuous
+    direction: positive
+    normalization:
+      min: 0.06050454297298041
+      max: 0.725104210312775
+    insignificant: true
+  estimated_annual_tax:
+    weight: 0.0186
+    kind: continuous
+    direction: positive
+    normalization:
+      min: 4188.52
+      max: 180503.79599999983
+    insignificant: false
+  tax_increase_pct_5yr:
+    weight: 0.0
+    kind: continuous
+    direction: positive
+    normalization:
+      min: -5.429197466270465
+      max: 145.47946747239726
+    insignificant: true
+  cta_distance_ft:
+    weight: 0.0129
+    kind: continuous
+    direction: positive
+    normalization:
+      min: 528.08
+      max: 4303.5
+    insignificant: false
+  appeal_count:
+    weight: 0.0
+    kind: continuous
+    direction: positive
+    normalization:
+      min: 1.0
+      max: 8.0
+    insignificant: true
+  open_violations_count:
+    weight: 0.0
+    kind: continuous
+    direction: positive
+    normalization:
+      min: 4.0
+      max: 4.0
+    insignificant: true
+  years_since_last_permit:
+    weight: 0.0
+    kind: continuous
+    direction: negative
+    normalization:
+      min: 7.59
+      max: 7.59
+    insignificant: true
+  vacant_violations_count:
+    weight: 0.0
+    kind: continuous
+    direction: positive
+    normalization:
+      min: 0.0
+      max: 0.0
+    insignificant: true
+  scofflaw_appearances_count:
+    weight: 0.0
+    kind: continuous
+    direction: positive
+    normalization:
+      min: 0.0
+      max: 0.0
+    insignificant: true
+  is_absentee:
+    weight: 0.0606
+    kind: binary
+    direction: negative
+    normalization:
+      min: 0.0
+      max: 1.0
+    insignificant: false
+  is_llc:
+    weight: 0.169
+    kind: binary
+    direction: positive
+    normalization:
+      min: 0.0
+      max: 1.0
+    insignificant: false
+  allows_multifamily_by_right:
+    weight: 0.0722
+    kind: binary
+    direction: negative
+    normalization:
+      min: 0.0
+      max: 1.0
+    insignificant: false
+  is_scofflaw:
+    weight: 0.0
+    kind: binary
+    direction: positive
+    normalization:
+      min: 0.0
+      max: 1.0
+    insignificant: true

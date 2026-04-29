@@ -122,10 +122,12 @@ def score_parcel(parcel_row: dict, scoring_config: ScoringConfig) -> float:
 
 
 def score_parcels(db_path: Path, scoring_config: ScoringConfig) -> int:
-    """Score every parcel in the DB; UPDATE score + score_version per row.
+    """Score every eligible parcel in the DB; UPDATE score + score_version per row.
 
-    Reads only the columns the config references plus `pin`. Always overwrites
-    existing scores. Returns the count of rows updated.
+    Always clears stale scores from ALL parcels first, then writes fresh scores
+    only for rows passing the eligibility filter (currently: is_condo_unit=0).
+    This ensures methodology changes that exclude previously-scored populations
+    don't leave stale scores in place. Returns the count of rows scored.
     """
     if not scoring_config.signals:
         return 0
@@ -137,7 +139,11 @@ def score_parcels(db_path: Path, scoring_config: ScoringConfig) -> int:
     conn = get_connection(db_path)
     try:
         rows = [dict(r) for r in conn.execute(select_sql).fetchall()]
+        # Clear stale scores from EVERY parcel up-front so filtered-out rows
+        # don't retain values from a prior methodology.
+        conn.execute("UPDATE parcels SET score = NULL, score_version = NULL")
         if not rows:
+            conn.commit()
             return 0
         updates = [
             {"pin": r["pin"],
@@ -173,6 +179,17 @@ def score_consolidation_groups(db_path: Path,
         ).fetchall()]
     finally:
         conn.close()
+
+    # Clear stale scores from every group first so the table state is fully
+    # determined by this run's config (mirrors score_parcels' behavior).
+    conn = get_connection(db_path)
+    try:
+        conn.execute("UPDATE consolidation_groups SET score = NULL, "
+                     "score_version = NULL")
+        conn.commit()
+    finally:
+        conn.close()
+
     if not group_ids:
         return 0
 
