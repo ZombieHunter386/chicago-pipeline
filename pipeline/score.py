@@ -13,6 +13,7 @@ from pathlib import Path
 
 import yaml
 
+from pipeline.consolidation_features import derive_group_features
 from pipeline.db import get_connection
 
 
@@ -153,6 +154,48 @@ def score_parcels(db_path: Path, scoring_config: ScoringConfig) -> int:
         return len(updates)
     finally:
         conn.close()
+
+
+def score_consolidation_groups(db_path: Path,
+                               scoring_config: ScoringConfig) -> int:
+    """Score every consolidation group; UPDATE score + score_version per row.
+
+    Each group's features are aggregated from its constituent parcels via
+    derive_group_features, then scored through score_parcel using the same
+    weights/normalization as parcels. Returns the count of groups updated.
+    """
+    if not scoring_config.signals:
+        return 0
+    conn = get_connection(db_path)
+    try:
+        group_ids = [r["group_id"] for r in conn.execute(
+            "SELECT group_id FROM consolidation_groups"
+        ).fetchall()]
+    finally:
+        conn.close()
+    if not group_ids:
+        return 0
+
+    updates = []
+    for gid in group_ids:
+        features = derive_group_features(gid, db_path)
+        updates.append({
+            "group_id": gid,
+            "score": score_parcel(features, scoring_config),
+            "score_version": scoring_config.version,
+        })
+
+    conn = get_connection(db_path)
+    try:
+        conn.executemany(
+            "UPDATE consolidation_groups SET score = :score, "
+            "score_version = :score_version WHERE group_id = :group_id",
+            updates,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return len(updates)
 
 
 def score(db_path: Path, scoring_yaml_path: Path) -> None:

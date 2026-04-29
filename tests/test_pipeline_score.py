@@ -427,3 +427,64 @@ def test_score_parcels_skips_individual_condo_units(tmp_path):
     assert rows["BUILDING_REP"] is not None
     assert rows["UNIT_1"] is None
     assert rows["UNIT_2"] is None
+
+
+import json as _json
+
+
+def test_score_consolidation_groups_writes_score_per_group(tmp_path):
+    """A 2-parcel consolidation group is scored using aggregated features.
+    The result is written to consolidation_groups.score / .score_version."""
+    parcels = [
+        {"pin": "PIN_A", "lot_size_sf": 3000.0, "estimated_annual_tax": 8000.0,
+         "is_condo_unit": 0},
+        {"pin": "PIN_B", "lot_size_sf": 4000.0, "estimated_annual_tax": 12000.0,
+         "is_condo_unit": 0},
+    ]
+    db_path = _build_score_db(tmp_path, parcels)
+    # Add a consolidation group manually
+    from pipeline.db import get_connection
+    conn = get_connection(db_path)
+    try:
+        conn.execute("""
+            INSERT INTO consolidation_groups
+              (group_id, pins, combined_lot_size_sf, combined_building_sf,
+               owner_name, detected_date)
+            VALUES (1, ?, 7000.0, NULL, 'TEST OWNER', '2026-04-28')
+        """, (_json.dumps(["PIN_A", "PIN_B"]),))
+        conn.commit()
+    finally:
+        conn.close()
+
+    cfg = score.ScoringConfig(version="1.1.0-test", top_n=20, signals=[
+        score.SignalConfig(signal="lot_size_sf", kind="continuous",
+                           weight=0.5, direction="positive",
+                           normalization_min=0.0, normalization_max=10000.0,
+                           insignificant=False),
+        score.SignalConfig(signal="estimated_annual_tax", kind="continuous",
+                           weight=0.5, direction="negative",
+                           normalization_min=0.0, normalization_max=20000.0,
+                           insignificant=False),
+    ])
+    n = score.score_consolidation_groups(db_path, cfg)
+    assert n == 1
+
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT score, score_version FROM consolidation_groups WHERE group_id = 1"
+        ).fetchone()
+    finally:
+        conn.close()
+    # combined_lot_size_sf=7000 / 10000 = 0.7 → contribution 0.7 * 0.5 = 0.35
+    # SUM(tax)=20000, normalized = 1.0, direction negative → flipped to 0.0
+    #   → contribution 0.0 * 0.5 = 0.0
+    # total = 0.35 → score 35.0
+    assert row["score"] == 35.0
+    assert row["score_version"] == "1.1.0-test"
+
+
+def test_score_consolidation_groups_handles_empty_table(tmp_path):
+    db_path = _build_score_db(tmp_path, [])
+    cfg = score.ScoringConfig(version="1.1.0-test", top_n=20, signals=[])
+    assert score.score_consolidation_groups(db_path, cfg) == 0
