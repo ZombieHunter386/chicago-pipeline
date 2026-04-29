@@ -4,6 +4,12 @@
 window.FilterState = {
   filters: {},   // { column: true | "value" | {min, max} }
   stage: null,
+  includeCondoUnits: false,
+  topNOnly: false,
+  // Map-layer toggles double as list filters. Categories present here are
+  // included; categories absent are excluded. Initial state mirrors the
+  // checkboxes in the layers panel (all on).
+  visibleCategories: new Set(['top', 'consolidated', 'outreach', 'other']),
 };
 
 window.filtersReady = (async function initFilters() {
@@ -15,6 +21,8 @@ window.filtersReady = (async function initFilters() {
     renderStagePills(schema.stage_pills);
     renderFilterPanel(schema.filter_groups);
     wireFilterToggle();
+    wireHeaderToggles();
+    wireLayerToggles();
 
     window.dispatchEvent(new CustomEvent('filterchange'));
   } catch (err) {
@@ -244,5 +252,58 @@ window.filterStateToQuery = function() {
     }
   }
   if (window.FilterState.stage) params.set('stage', window.FilterState.stage);
+  if (window.FilterState.includeCondoUnits) {
+    params.set('include_condo_units', 'true');
+  }
+  if (window.FilterState.topNOnly) {
+    params.set('top_n_only', 'true');
+  }
+  // Pass active categories so the server filters list/map identically.
+  // Skip when all 4 are visible (no-op filter).
+  const allCats = ['top', 'consolidated', 'outreach', 'other'];
+  const visible = allCats.filter(c => window.FilterState.visibleCategories.has(c));
+  if (visible.length > 0 && visible.length < allCats.length) {
+    params.set('categories', visible.join(','));
+  }
   return params.toString();
 };
+
+function wireHeaderToggles() {
+  const condoCb = document.getElementById('include-condo-units');
+  if (condoCb) {
+    condoCb.addEventListener('change', () => {
+      window.FilterState.includeCondoUnits = condoCb.checked;
+      window.dispatchEvent(new CustomEvent('filterchange'));
+    });
+  }
+  const topNCb = document.getElementById('top-n-only');
+  if (topNCb) {
+    topNCb.addEventListener('change', () => {
+      window.FilterState.topNOnly = topNCb.checked;
+      window.dispatchEvent(new CustomEvent('filterchange'));
+    });
+  }
+}
+
+function wireLayerToggles() {
+  // Map's layer panel checkboxes also act as list filters. When unchecked,
+  // the matching parcel-category disappears from BOTH the map and the list.
+  // Without this wiring the map's setStyle({opacity:0}) was decoupled from
+  // the left list — user reported this as a bug.
+  const layerToCategory = {
+    top: 'top',
+    consolidated: 'consolidated',
+    outreach: 'outreach',
+    other: 'other',
+  };
+  document.querySelectorAll('.layer-toggle input[data-layer]').forEach(cb => {
+    const layer = cb.dataset.layer;
+    const cat = layerToCategory[layer];
+    if (!cat) return; // 'group' and 'parcel_outlines' are visual-only
+    cb.addEventListener('change', () => {
+      if (cb.checked) window.FilterState.visibleCategories.add(cat);
+      else window.FilterState.visibleCategories.delete(cat);
+      window.dispatchEvent(new CustomEvent('filterchange'));
+    });
+  });
+}

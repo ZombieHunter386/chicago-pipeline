@@ -2,8 +2,17 @@
 
 (function () {
   const LIST_PAGE_SIZE = 20;
+  // Cap groups returned per filterchange — without this 1k+ same-owner
+  // clusters all land in the merge and the list overflows the page.
+  // 100 is plenty: groups sort by score desc so the 100 visible are the
+  // top-100 candidates. Enough for "Load more" to cycle through.
+  const GROUPS_FETCH_LIMIT = 100;
   let currentOffset = 0;
   let currentTotal = 0;
+  // Cache the merged + sorted entity queue between renders so 'Load more'
+  // can paginate across both groups and parcels without duplicating items.
+  let mergedQueue = [];
+  let renderedFromQueue = 0;
   let reqId = 0;
   let sortBy = '';
   let sortDir = 'desc';
@@ -14,6 +23,31 @@
   });
 
   document.getElementById('load-more').onclick = () => {
+    // If the merged queue still has unrendered entries (groups + already-
+    // fetched parcels), render the next page from it without re-fetching.
+    // Only hit /api/parcels when the local queue is exhausted.
+    const moreInQueue = renderedFromQueue < mergedQueue.length;
+    if (moreInQueue) {
+      const list = document.getElementById('parcel-list');
+      const renderEnd = Math.min(renderedFromQueue + LIST_PAGE_SIZE, mergedQueue.length);
+      for (let i = renderedFromQueue; i < renderEnd; i++) {
+        const item = mergedQueue[i];
+        if (item.kind === 'group') {
+          list.appendChild(renderGroupRow(item.payload));
+        } else {
+          list.appendChild(renderParcelRow(item.payload));
+        }
+      }
+      renderedFromQueue = renderEnd;
+      // Update the count label and Load-more visibility without a re-fetch.
+      document.getElementById('count-label').textContent =
+        `${renderedFromQueue.toLocaleString()} of ${currentTotal.toLocaleString()}`;
+      const stillMoreQueue = renderedFromQueue < mergedQueue.length;
+      const moreInApi = (currentOffset + LIST_PAGE_SIZE) < currentTotal;
+      document.getElementById('load-more').style.display =
+        (stillMoreQueue || moreInApi) ? '' : 'none';
+      return;
+    }
     currentOffset += LIST_PAGE_SIZE;
     loadList({replace: false});
   };
@@ -66,42 +100,94 @@
 
     if (replace) {
       list.innerHTML = '';
-      // On a replace, also fetch consolidation groups using the same
-      // filter query string so groups whose members don't match the
-      // filter are pruned from the list. They don't paginate (typically
-      // <100 in a bbox) so we just dump them in once.
+      mergedQueue = [];
+      renderedFromQueue = 0;
+
+      // Fetch up to GROUPS_FETCH_LIMIT consolidation groups using the same
+      // filter query so groups whose members don't match the filter drop
+      // out alongside parcels. Groups paginate with parcels via mergedQueue.
+      let groups = [];
       try {
-        const rg = await fetch(`/api/consolidation-groups?${qs}`);
+        const rg = await fetch(`/api/consolidation-groups?${qs}&limit=${GROUPS_FETCH_LIMIT}`);
         if (rg.ok) {
           const gd = await rg.json();
           if (myId !== reqId) return; // stale
-          (gd.groups || []).forEach(g => list.appendChild(renderGroupRow(g)));
+          groups = gd.groups || [];
         }
       } catch (_) { /* non-fatal — parcels still render below */ }
+
+      // Merge groups + parcels into one ranked queue ordered by score
+      // (NULLs sink). Subsequent 'Load more' clicks walk through this queue
+      // — and fetch more parcels when the queue is exhausted.
+      mergedQueue = [
+        ...groups.map(g => ({ kind: 'group', score: g.score, payload: g })),
+        ...data.parcels.map(p => ({ kind: 'parcel', score: p.score, payload: p })),
+      ];
+      mergedQueue.sort((a, b) => {
+        const aNull = a.score == null, bNull = b.score == null;
+        if (aNull && !bNull) return 1;
+        if (!aNull && bNull) return -1;
+        if (aNull && bNull) return 0;
+        return b.score - a.score;
+      });
+    } else {
+      // 'Load more' — append next page of parcels to the queue so pagination
+      // continues to interleave with any remaining groups.
+      data.parcels.forEach(p => {
+        mergedQueue.push({ kind: 'parcel', score: p.score, payload: p });
+      });
+      // Re-sort the tail (everything we haven't rendered yet) so newly-added
+      // parcels land in the right rank order relative to remaining groups.
+      const head = mergedQueue.slice(0, renderedFromQueue);
+      const tail = mergedQueue.slice(renderedFromQueue);
+      tail.sort((a, b) => {
+        const aNull = a.score == null, bNull = b.score == null;
+        if (aNull && !bNull) return 1;
+        if (!aNull && bNull) return -1;
+        if (aNull && bNull) return 0;
+        return b.score - a.score;
+      });
+      mergedQueue = head.concat(tail);
     }
 
-    if (replace && data.parcels.length === 0) {
-      // Don't override the count label here — groups may have rendered above.
+    if (replace && mergedQueue.length === 0) {
       document.getElementById('count-label').textContent =
         `0 of ${currentTotal.toLocaleString()}`;
       document.getElementById('top-bar-meta').textContent =
-        `Score v N/A · ${currentTotal.toLocaleString()} parcels · Top ${LIST_PAGE_SIZE} shown`;
-      // If neither parcels nor groups are present, show the empty state.
-      if (list.children.length === 0) {
-        list.textContent = 'No parcels match these filters.';
-      }
+        `${currentTotal.toLocaleString()} parcels`;
+      list.textContent = 'No parcels match these filters.';
       loadMore.style.display = 'none';
       return;
     }
 
-    data.parcels.forEach(p => list.appendChild(renderParcelRow(p)));
+    // Render the next LIST_PAGE_SIZE entries from the merged queue.
+    const renderEnd = Math.min(renderedFromQueue + LIST_PAGE_SIZE, mergedQueue.length);
+    for (let i = renderedFromQueue; i < renderEnd; i++) {
+      const item = mergedQueue[i];
+      if (item.kind === 'group') {
+        list.appendChild(renderGroupRow(item.payload));
+      } else {
+        list.appendChild(renderParcelRow(item.payload));
+      }
+    }
+    renderedFromQueue = renderEnd;
 
+    // Count label shows rendered-so-far / total parcel count.
     document.getElementById('count-label').textContent =
-      `${Math.min(currentOffset + LIST_PAGE_SIZE, currentTotal)} of ${currentTotal.toLocaleString()}`;
+      `${renderedFromQueue.toLocaleString()} of ${currentTotal.toLocaleString()}`;
+    const condoNote = window.FilterState && window.FilterState.includeCondoUnits
+      ? '(incl. condo units)'
+      : '(excl. individual condo units)';
+    const topNote = window.FilterState && window.FilterState.topNOnly
+      ? '· Top 20 Scores only'
+      : '';
     document.getElementById('top-bar-meta').textContent =
-      `Score v N/A · ${currentTotal.toLocaleString()} parcels · Top ${LIST_PAGE_SIZE} shown`;
-    loadMore.style.display =
-      (currentOffset + LIST_PAGE_SIZE) < currentTotal ? '' : 'none';
+      `${currentTotal.toLocaleString()} parcels ${condoNote} ${topNote}`.trim();
+    // Show 'Load more' when either the merged queue still has unrendered
+    // entries OR the parcels API has more pages to fetch.
+    const moreInQueue = renderedFromQueue < mergedQueue.length;
+    const moreInApi = (currentOffset + LIST_PAGE_SIZE) < currentTotal;
+    loadMore.style.display = (moreInQueue || moreInApi) ? '' : 'none';
   }
 
   function renderParcelRow(p) {
@@ -119,10 +205,11 @@
     ].filter(Boolean).join(' · ') || '—';
 
     const tags = [];
-    // Score tag — stub since score is NULL
     if (p.score != null) {
       const cls = p.score >= 80 ? 'score' : 'score-med';
-      tags.push(`<span class="tag ${cls}">${Math.round(p.score)}</span>`);
+      // Score is out of 100 (significant weights sum to 1.0 per pipeline.score).
+      // 2 decimals so the user can distinguish near-ties.
+      tags.push(`<span class="tag ${cls}" title="Score out of 100">${p.score.toFixed(2)}</span>`);
     }
     if (p.is_absentee) tags.push('<span class="tag absentee">Absentee</span>');
     if (p.is_llc) tags.push('<span class="tag llc">LLC</span>');
@@ -183,6 +270,10 @@
 
     const title = g.owner_name || `Group ${g.group_id}`;
     const tags = [];
+    if (g.score != null) {
+      const cls = g.score >= 80 ? 'score' : 'score-med';
+      tags.push(`<span class="tag ${cls}" title="Score out of 100">${g.score.toFixed(2)}</span>`);
+    }
     tags.push(`<span class="tag llc">Consolidation Group</span>`);
     if (g.sum_estimated_annual_tax) {
       const t = Math.round(g.sum_estimated_annual_tax).toLocaleString();

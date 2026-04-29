@@ -8,6 +8,7 @@ from werkzeug.exceptions import HTTPException
 
 from webapp.filter_schema import build_filter_schema
 from webapp.parcel_query import (
+    ALLOWED_CATEGORIES,
     ALLOWED_FILTER_COLUMNS,
     build_count_query,
     build_parcel_query,
@@ -19,7 +20,56 @@ UI_FILTERS_YAML = Path(__file__).resolve().parent.parent / "config" / "ui_filter
 
 DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 1000
-MAP_MAX_PINS = 5000
+# Bumped from 5000 to 80000 so the user can see every parcel on the map
+# (67,677 parcels city-wide; with condo units toggled on, all of them).
+# Map.js uses canvas rendering at this scale for performance.
+MAP_MAX_PINS = 80000
+
+
+def _load_top_n() -> int:
+    """top_n from scoring.yaml (default 20)."""
+    import yaml
+    configured = current_app.config.get("SCORING_YAML_PATH")
+    if configured:
+        yaml_path = Path(configured)
+    else:
+        yaml_path = (Path(__file__).resolve().parent.parent
+                     / "config" / "scoring.yaml")
+    if not yaml_path.exists():
+        return 20
+    try:
+        return int(yaml.safe_load(yaml_path.read_text()).get("top_n", 20))
+    except Exception:
+        return 20
+
+
+def _resolve_top_n_threshold(conn, filters, stage,
+                             include_condo_units: bool,
+                             top_n: int) -> float | None:
+    """Score at rank top_n WITHIN the filtered population. Computed per
+    request so 'Top-N only' respects whatever other filters are active —
+    a user filtering by 'is_absentee=Yes' sees the top 20 of the filter
+    result, not the global top 20 (which might all be excluded by the
+    filter). Returns None when fewer than top_n rows match the filter."""
+    from webapp.parcel_query import _build_where
+    where_clauses, params = _build_where(filters, stage, include_condo_units)
+    where_clauses.append("score IS NOT NULL")
+    where_sql = " AND ".join(where_clauses)
+    sql = (
+        f"SELECT score FROM parcels WHERE {where_sql} "
+        f"ORDER BY score DESC LIMIT 1 OFFSET ?"
+    )
+    row = conn.execute(sql, [*params, max(0, top_n - 1)]).fetchone()
+    return row["score"] if row is not None else None
+
+
+def _parse_visible_categories(arg: str | None) -> set[str] | None:
+    """Comma-separated category list; returns None when omitted/empty."""
+    if not arg:
+        return None
+    cats = {c.strip() for c in arg.split(",") if c.strip()}
+    cats &= ALLOWED_CATEGORIES
+    return cats or None
 
 
 def register(app: Flask) -> None:
@@ -37,11 +87,33 @@ def register(app: Flask) -> None:
         )
         return jsonify(schema)
 
+    @app.get("/api/scoring-config")
+    def api_scoring_config():
+        """Return the active scoring YAML so the UI can render the
+        per-signal score breakdown for a selected parcel.
+
+        Resolves the YAML path from app config; falls back to
+        config/scoring.yaml relative to the project root."""
+        import yaml
+        configured = current_app.config.get("SCORING_YAML_PATH")
+        if configured:
+            yaml_path = Path(configured)
+        else:
+            yaml_path = (Path(__file__).resolve().parent.parent
+                         / "config" / "scoring.yaml")
+        if not yaml_path.exists():
+            return jsonify({"error": "no scoring config"}), 404
+        with yaml_path.open() as f:
+            data = yaml.safe_load(f)
+        return jsonify(data)
+
     @app.get("/api/parcels")
     def api_parcels():
         filters = _parse_filters(request.args)
         stage = request.args.get("stage") or None
         include_units = request.args.get("include_condo_units", "").lower() in {"true", "1"}
+        top_n_only = request.args.get("top_n_only", "").lower() in {"true", "1"}
+        visible_categories = _parse_visible_categories(request.args.get("categories"))
         sort = request.args.get("sort") or None
         direction = request.args.get("dir", "desc")
         try:
@@ -52,23 +124,37 @@ def register(app: Flask) -> None:
         limit = max(1, min(limit, MAX_PAGE_SIZE))
         offset = max(0, offset)
 
-        try:
-            list_sql, list_params = build_parcel_query(
-                filters, stage, limit, offset,
-                include_condo_units=include_units,
-                sort=sort, direction=direction,
-            )
-        except ValueError as e:
-            abort(400, str(e))
-        count_sql, count_params = build_count_query(
-            filters, stage, include_condo_units=include_units
-        )
-
         with closing(_conn()) as conn:
+            top_n = _load_top_n()
+            top_n_threshold = _resolve_top_n_threshold(
+                conn, filters, stage, include_units, top_n
+            )
+
+            try:
+                list_sql, list_params = build_parcel_query(
+                    filters, stage, limit, offset,
+                    include_condo_units=include_units,
+                    sort=sort, direction=direction,
+                    top_n_only=top_n_only,
+                    top_n_threshold=top_n_threshold,
+                    visible_categories=visible_categories,
+                )
+            except ValueError as e:
+                abort(400, str(e))
+            count_sql, count_params = build_count_query(
+                filters, stage, include_condo_units=include_units,
+                top_n_only=top_n_only,
+                top_n_threshold=top_n_threshold,
+                visible_categories=visible_categories,
+            )
+
             parcels = [dict(r) for r in conn.execute(list_sql, list_params)]
             total = conn.execute(count_sql, count_params).fetchone()["n"]
 
-        return jsonify({"total": total, "parcels": parcels})
+        return jsonify({
+            "total": total, "parcels": parcels,
+            "top_n": top_n, "top_n_threshold": top_n_threshold,
+        })
 
     @app.get("/api/parcels/<pin>")
     def api_parcel_detail(pin: str):
@@ -127,19 +213,28 @@ def register(app: Flask) -> None:
         filters = _parse_filters(request.args)
         stage = request.args.get("stage") or None
         include_units = request.args.get("include_condo_units", "").lower() in {"true", "1"}
+        top_n_only = request.args.get("top_n_only", "").lower() in {"true", "1"}
+        visible_categories = _parse_visible_categories(request.args.get("categories"))
         sort = request.args.get("sort") or None
         direction = request.args.get("dir", "desc")
-        # Map gets up to MAP_MAX_PINS pins
-        try:
-            sql, params = build_parcel_query(
-                filters, stage, limit=MAP_MAX_PINS, offset=0,
-                include_condo_units=include_units,
-                sort=sort, direction=direction,
-            )
-        except ValueError as e:
-            abort(400, str(e))
 
         with closing(_conn()) as conn:
+            top_n = _load_top_n()
+            top_n_threshold = _resolve_top_n_threshold(
+                conn, filters, stage, include_units, top_n
+            )
+            try:
+                sql, params = build_parcel_query(
+                    filters, stage, limit=MAP_MAX_PINS, offset=0,
+                    include_condo_units=include_units,
+                    sort=sort, direction=direction,
+                    top_n_only=top_n_only,
+                    top_n_threshold=top_n_threshold,
+                    visible_categories=visible_categories,
+                )
+            except ValueError as e:
+                abort(400, str(e))
+
             rows = [dict(r) for r in conn.execute(sql, params)]
 
         features = []
@@ -156,11 +251,14 @@ def register(app: Flask) -> None:
                     "pin": r["pin"],
                     "address": r["address"],
                     "score": r["score"],
-                    "category": _map_category(r),
+                    "category": _map_category(r, top_n_threshold),
                 },
             })
 
-        return jsonify({"type": "FeatureCollection", "features": features})
+        return jsonify({
+            "type": "FeatureCollection", "features": features,
+            "top_n": top_n, "top_n_threshold": top_n_threshold,
+        })
 
     @app.get("/api/consolidation-groups")
     def api_consolidation_groups():
@@ -190,6 +288,11 @@ def register(app: Flask) -> None:
             min_lot = float(request.args.get("min_combined_lot_size_sf", 5000))
         except ValueError:
             min_lot = 5000.0
+        try:
+            limit = int(request.args.get("limit", 200))
+        except ValueError:
+            limit = 200
+        limit = max(1, min(limit, 5000))
         multi_pin10_only = request.args.get(
             "multi_pin10_only", "true"
         ).lower() in {"true", "1"}
@@ -218,6 +321,7 @@ def register(app: Flask) -> None:
                 SELECT
                     g.group_id, g.pins, g.owner_name, g.detected_date,
                     g.combined_lot_size_sf, g.combined_building_sf,
+                    g.score, g.score_version,
                     AVG(p.lat) AS centroid_lat,
                     AVG(p.lng) AS centroid_lng,
                     COUNT(p.pin) AS parcel_count,
@@ -231,7 +335,9 @@ def register(app: Flask) -> None:
                 WHERE g.group_id IN ({match_sql})
                 GROUP BY g.group_id
                 {having_sql}
-                ORDER BY g.combined_lot_size_sf DESC NULLS LAST
+                ORDER BY g.score DESC NULLS LAST,
+                         g.combined_lot_size_sf DESC NULLS LAST
+                LIMIT {limit}
             """, where_params).fetchall()
         return jsonify({"groups": [dict(r) for r in rows]})
 
@@ -334,14 +440,21 @@ def _parse_filters(args) -> dict[str, Any]:
     return filters
 
 
-def _map_category(row: dict) -> str:
-    """Pin color bucket. Scoring not implemented, so 'top' is never emitted yet."""
+def _map_category(row: dict, top_n_threshold: float | None = None) -> str:
+    """Pin color bucket. 'top' fires when the row's score is at or above
+    the top-N threshold (default: top 20 by score across the parcels table).
+    Bucket precedence: outreach > consolidated > top > other. Listed parcels
+    are surfaced separately in the outreach stage."""
     if row.get("listing_status") == "listed":
         return "listed"
     if row.get("stage") == "outreach":
         return "outreach"
     if row.get("consolidation_group_id") is not None:
         return "consolidated"
+    score = row.get("score")
+    if (top_n_threshold is not None and score is not None
+            and score >= top_n_threshold):
+        return "top"
     return "other"
 
 

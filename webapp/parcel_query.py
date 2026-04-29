@@ -46,6 +46,51 @@ DEFAULT_ORDER_BY = (
 )
 
 
+PARCEL_LIST_COLUMNS = (
+    "*"  # placeholder — see SELECT below
+)
+
+
+# Categories that the layer toggles surface — must stay aligned with
+# webapp/routes.py:_map_category() so the SQL filter and the assigned
+# server-side category label agree.
+ALLOWED_CATEGORIES = {"top", "consolidated", "outreach", "other"}
+
+
+def _category_clause(visible_categories: set[str], top_n_threshold: float | None) -> str | None:
+    """Build a SQL clause that keeps rows whose category is in
+    visible_categories. Returns None when all categories are visible
+    (no-op filter). Mirrors the bucketing rule from _map_category()."""
+    if not visible_categories or visible_categories == ALLOWED_CATEGORIES:
+        return None
+
+    parts = []
+    if "outreach" in visible_categories:
+        parts.append("stage = 'outreach'")
+    if "consolidated" in visible_categories:
+        parts.append("(stage IS NULL OR stage <> 'outreach') "
+                     "AND consolidation_group_id IS NOT NULL")
+    if "top" in visible_categories and top_n_threshold is not None:
+        parts.append("(stage IS NULL OR stage <> 'outreach') "
+                     "AND consolidation_group_id IS NULL "
+                     f"AND score >= {top_n_threshold}")
+    if "other" in visible_categories:
+        # "other" = none of the above buckets.
+        if top_n_threshold is not None:
+            parts.append("(stage IS NULL OR stage <> 'outreach') "
+                         "AND consolidation_group_id IS NULL "
+                         f"AND (score IS NULL OR score < {top_n_threshold})")
+        else:
+            parts.append("(stage IS NULL OR stage <> 'outreach') "
+                         "AND consolidation_group_id IS NULL")
+    if not parts:
+        # Caller passed only category names that need a threshold we don't
+        # have — fall through to "match nothing" rather than silently match
+        # everything.
+        return "1 = 0"
+    return "(" + " OR ".join(f"({p})" for p in parts) + ")"
+
+
 def build_parcel_query(
     filters: dict[str, Any],
     stage: str | None,
@@ -54,9 +99,19 @@ def build_parcel_query(
     include_condo_units: bool = False,
     sort: str | None = None,
     direction: str = "desc",
+    top_n_only: bool = False,
+    top_n_threshold: float | None = None,
+    visible_categories: set[str] | None = None,
 ) -> tuple[str, list]:
     """Return (sql, params) for the ranked list."""
     where_clauses, params = _build_where(filters, stage, include_condo_units)
+    if top_n_only and top_n_threshold is not None:
+        where_clauses.append("score >= ?")
+        params.append(top_n_threshold)
+    if visible_categories:
+        cat_clause = _category_clause(visible_categories, top_n_threshold)
+        if cat_clause:
+            where_clauses.append(cat_clause)
     where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
     if sort is None:
@@ -87,9 +142,19 @@ def build_count_query(
     filters: dict[str, Any],
     stage: str | None,
     include_condo_units: bool = False,
+    top_n_only: bool = False,
+    top_n_threshold: float | None = None,
+    visible_categories: set[str] | None = None,
 ) -> tuple[str, list]:
     """Return (sql, params) for the total-count of matching rows."""
     where_clauses, params = _build_where(filters, stage, include_condo_units)
+    if top_n_only and top_n_threshold is not None:
+        where_clauses.append("score >= ?")
+        params.append(top_n_threshold)
+    if visible_categories:
+        cat_clause = _category_clause(visible_categories, top_n_threshold)
+        if cat_clause:
+            where_clauses.append(cat_clause)
     where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
     sql = f"SELECT COUNT(*) AS n FROM parcels {where_sql}"
     return sql, params

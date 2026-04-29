@@ -53,9 +53,14 @@
   let selectedPin = null;
   let selectedGroupId = null;
   let reqId = 0;
-  const layerEnabled = {
-    top: true, consolidated: true, outreach: true, other: true,
-    group: true, parcel_outlines: false,
+  // 'group' and 'parcel_outlines' don't have server-side category filters
+  // — they're map-only visual layers, so we still toggle them client-side.
+  // The four parcel-category toggles (top/consolidated/outreach/other) are
+  // wired in filters.js to dispatch filterchange and re-fetch from the
+  // server. We don't double-hide them client-side any more.
+  const visualOnlyLayerEnabled = {
+    group: true,
+    parcel_outlines: false,
   };
 
   let mapSortBy = '';
@@ -80,7 +85,11 @@
   });
 
   function initMap() {
-    map = L.map('map', { zoomControl: false }).setView([41.9395, -87.6535], 14);
+    // preferCanvas: tells Leaflet to render circleMarkers on a single canvas
+    // instead of as individual SVG nodes. With MAP_MAX_PINS bumped to 80k,
+    // SVG would create 80k DOM nodes — canvas keeps the page responsive.
+    map = L.map('map', { zoomControl: false, preferCanvas: true })
+      .setView([41.9395, -87.6535], 14);
     setBasemap('dark');
     L.control.zoom({ position: 'bottomright' }).addTo(map);
     markerLayer = L.layerGroup().addTo(map);
@@ -89,13 +98,20 @@
     document.querySelectorAll('.layer-toggle input[data-layer]').forEach(cb => {
       cb.addEventListener('change', (e) => {
         const layer = e.target.dataset.layer;
-        if (!(layer in layerEnabled)) return;
-        layerEnabled[layer] = e.target.checked;
+        // Only handle the visual-only layers here (group ring + parcel outlines).
+        // The four category toggles (top/consolidated/outreach/other) are
+        // wired in filters.js → they dispatch filterchange so both list and
+        // map re-fetch, and the server filters by category. Doing both client
+        // and server hiding caused 'All others' to vanish on toggle-off-then-on.
+        if (!(layer in visualOnlyLayerEnabled)) return;
+        visualOnlyLayerEnabled[layer] = e.target.checked;
         if (layer === 'parcel_outlines') {
           const l = ensureParcelLayer();
           if (l) e.target.checked ? l.addTo(map) : map.removeLayer(l);
-        } else {
-          applyLayerVisibility();
+        } else if (layer === 'group') {
+          // Show/hide the consolidation-group ring markers without re-fetching
+          // — they're a separate layer that doesn't filter the parcel list.
+          applyVisualOnlyVisibility();
         }
       });
     });
@@ -181,7 +197,9 @@
     try {
       const [r, rg] = await Promise.all([
         fetch(`/api/map-data?${qs}${sortQs}`),
-        fetch('/api/consolidation-groups'),
+        // Pass the same filter query so groups whose members don't match the
+        // active filters drop off the map alongside the parcel pins.
+        fetch(`/api/consolidation-groups?${qs}`),
       ]);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       geo = await r.json();
@@ -254,7 +272,7 @@
 
       const labelText =
         (props.address ? String(props.address) : (props.pin ? String(props.pin) : '')) +
-        (props.score != null ? ` (${Math.round(props.score)})` : '');
+        (props.score != null ? ` · score ${props.score.toFixed(2)} / 100` : '');
       // bindTooltip with a string is treated as content; Leaflet renders
       // it as text — but to be defensive, escape and pass via {} options.
       marker.bindTooltip(escapeHtml(labelText), {
@@ -276,7 +294,7 @@
       markerLayer.addLayer(marker);
     });
 
-    applyLayerVisibility();
+    applyVisualOnlyVisibility();
 
     // Re-apply selection ring if the previously selected pin survived
     // the filter change.
@@ -288,28 +306,14 @@
     }
   }
 
-  function applyLayerVisibility() {
-    markerLayer.eachLayer(m => {
-      const cat = m._category || 'other';
-      const visible = !!layerEnabled[cat];
-      m.setStyle({ opacity: visible ? 1 : 0, fillOpacity: visible ? 0.8 : 0 });
-    });
+  function applyVisualOnlyVisibility() {
+    // Only the group-ring layer needs client-side visibility toggling.
+    // Parcel pins are filtered by the server based on visibleCategories
+    // — when a category is unchecked, the markers don't get rendered at
+    // all, so there's nothing to hide here.
     groupLayer.eachLayer(m => {
-      const visible = !!layerEnabled.group;
+      const visible = !!visualOnlyLayerEnabled.group;
       m.setStyle({ opacity: visible ? 1 : 0, fillOpacity: visible ? 0.15 : 0 });
-    });
-    syncSelectionRingVisibility();
-  }
-
-  function syncSelectionRingVisibility() {
-    if (!selectionRing || selectedPin == null) return;
-    const marker = markersByPin[selectedPin];
-    if (!marker) return;
-    const cat = marker._category || 'other';
-    const visible = !!layerEnabled[cat];
-    selectionRing.setStyle({
-      opacity: visible ? 1 : 0,
-      fillOpacity: 0,
     });
   }
 
@@ -356,6 +360,5 @@
       interactive: false,
     }).addTo(map);
     if (pan) map.panTo(latlng);
-    syncSelectionRingVisibility();
   }
 })();

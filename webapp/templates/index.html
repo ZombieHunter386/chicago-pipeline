@@ -35,6 +35,16 @@
              aria-label="Search address"
              style="width:100%; background:#0d1117; color:#c9d1d9; border:1px solid #30363d; border-radius:4px; padding:6px 8px; font-size:12px;" />
     </div>
+    <div class="visibility-row" style="padding: 8px 16px; display:flex; gap:12px; align-items:center; border-bottom:1px solid #30363d; flex-wrap:wrap;">
+      <label style="color:#8b949e; font-size:11px; display:flex; align-items:center; gap:6px; cursor:pointer;">
+        <input type="checkbox" id="include-condo-units" />
+        Show individual condo units
+      </label>
+      <label style="color:#8b949e; font-size:11px; display:flex; align-items:center; gap:6px; cursor:pointer;">
+        <input type="checkbox" id="top-n-only" />
+        Top 20 Scores only
+      </label>
+    </div>
     <div class="sort-row" style="padding: 8px 16px; display:flex; gap:6px; align-items:center; border-bottom:1px solid #30363d;">
       <label for="sort-by" style="color:#8b949e; font-size:11px; flex:0 0 auto;">Sort:</label>
       <select id="sort-by" style="flex:1; background:#0d1117; color:#c9d1d9; border:1px solid #30363d; border-radius:4px; padding:4px;">
@@ -94,7 +104,7 @@
       <label class="layer-toggle"><input type="radio" name="basemap" value="dark" checked> Dark</label>
       <label class="layer-toggle" style="margin-bottom:10px;"><input type="radio" name="basemap" value="satellite"> Satellite</label>
       <h3>Layers</h3>
-      <label class="layer-toggle"><input type="checkbox" checked data-layer="top"> <span class="layer-dot" style="background:#238636" aria-hidden="true"></span> Top-N scored</label>
+      <label class="layer-toggle"><input type="checkbox" checked data-layer="top"> <span class="layer-dot" style="background:#238636" aria-hidden="true"></span> Top 20 Scores</label>
       <label class="layer-toggle"><input type="checkbox" checked data-layer="consolidated"> <span class="layer-dot" style="background:#a855f7" aria-hidden="true"></span> Consolidated</label>
       <label class="layer-toggle"><input type="checkbox" checked data-layer="group"> <span class="layer-dot" style="background:transparent; border:2px solid #a855f7;" aria-hidden="true"></span> Group markers</label>
       <label class="layer-toggle"><input type="checkbox" checked data-layer="outreach"> <span class="layer-dot" style="background:#58a6ff" aria-hidden="true"></span> Outreach sent</label>

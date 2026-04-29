@@ -328,17 +328,154 @@
     ]);
   }
 
+  // Cache the scoring config across renders so we don't refetch per parcel.
+  let _scoringConfig = null;
+  let _scoringConfigPromise = null;
+
+  function loadScoringConfig() {
+    if (_scoringConfig != null) return Promise.resolve(_scoringConfig);
+    if (_scoringConfigPromise) return _scoringConfigPromise;
+    _scoringConfigPromise = fetch('/api/scoring-config')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { _scoringConfig = d; return d; })
+      .catch(() => null);
+    return _scoringConfigPromise;
+  }
+
+  // Mirror pipeline.score.normalize_signal — keep these in lock-step. If the
+  // Python rules change, update this too.
+  function normalizeSignal(rawValue, sigCfg) {
+    if (sigCfg.kind === 'binary') {
+      if (rawValue == null) return 0.0;
+      return rawValue ? 1.0 : 0.0;
+    }
+    if (rawValue == null) return 0.5;
+    const lo = sigCfg.normalization.min;
+    const hi = sigCfg.normalization.max;
+    if (hi === lo) return 0.5;
+    if (rawValue <= lo) return 0.0;
+    if (rawValue >= hi) return 1.0;
+    return (rawValue - lo) / (hi - lo);
+  }
+
   function sectionScoreBreakdown(p) {
-    // STUB — scoring not yet implemented (see plan Risks section)
     const el = document.createElement('div');
     el.className = 'detail-section';
-    el.innerHTML = `
-      <h3>Score Breakdown</h3>
-      <div style="font-size:12px; color:#8b949e; padding:8px 0;">
-        Scoring not yet available — run <code style="color:#c9d1d9;">pipeline.score</code> to populate.
+    el.innerHTML = '<h3>Score Breakdown</h3><div class="score-breakdown-body" style="font-size:12px; color:#8b949e; padding:8px 0;">Loading…</div>';
+    const body = el.querySelector('.score-breakdown-body');
+
+    if (p.score == null) {
+      body.innerHTML = `
+        Score not populated for this parcel. Individual condo units are
+        skipped at score time — see Score plan §3 for the rationale. Run
+        <code style="color:#c9d1d9;">.venv/bin/python -m pipeline.score</code>
+        to refresh after methodology changes.
+      `;
+      return el;
+    }
+
+    loadScoringConfig().then(cfg => {
+      if (!cfg || !cfg.signals) {
+        body.textContent = "Couldn't load scoring config.";
+        return;
+      }
+      renderScoreBreakdown(body, p, cfg);
+    });
+
+    return el;
+  }
+
+  function renderScoreBreakdown(host, p, cfg) {
+    // Compute per-signal contribution with the same math as pipeline.score
+    // so the breakdown matches the score column exactly.
+    const rows = [];
+    let total = 0;
+    for (const [name, sig] of Object.entries(cfg.signals)) {
+      const raw = p[name];
+      const normalized = normalizeSignal(raw, sig);
+      const flipped = sig.direction === 'negative'
+        ? (1.0 - normalized) : normalized;
+      const contribution = flipped * sig.weight;
+      total += contribution;
+      rows.push({
+        name, raw, normalized, flipped, sig, contribution,
+        is_imputed: raw == null,
+      });
+    }
+
+    // Sort by absolute contribution descending — biggest movers first.
+    rows.sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution));
+
+    // The recomputed total should match p.score within rounding.
+    const recomputed = Math.round(total * 100 * 10000) / 10000;
+
+    let html = `
+      <div style="font-size:12px; color:#c9d1d9; padding:6px 0;">
+        <span style="font-size:18px; color:#58a6ff; font-weight:600;">${p.score.toFixed(2)}</span>
+        <span style="color:#8b949e; font-size:11px; margin-left:6px;">
+          / 100 · version ${escapeHtml(cfg.version || '?')}
+        </span>
+      </div>
+      <table style="width:100%; font-size:11px; border-collapse:collapse; margin-top:6px;">
+        <thead>
+          <tr style="color:#8b949e; text-align:left;">
+            <th style="padding:4px 6px; border-bottom:1px solid #30363d;">Signal</th>
+            <th style="padding:4px 6px; border-bottom:1px solid #30363d;">Raw</th>
+            <th style="padding:4px 6px; border-bottom:1px solid #30363d;">Norm</th>
+            <th style="padding:4px 6px; border-bottom:1px solid #30363d;">Dir</th>
+            <th style="padding:4px 6px; border-bottom:1px solid #30363d;">Weight</th>
+            <th style="padding:4px 6px; border-bottom:1px solid #30363d; text-align:right;">Contrib</th>
+          </tr>
+        </thead>
+        <tbody>
+    `;
+
+    for (const r of rows) {
+      const insig = r.sig.insignificant;
+      const rowStyle = insig ? 'opacity:0.45;' : '';
+      const rawDisplay = r.raw == null
+        ? '<span style="color:#8b949e; font-style:italic;">null</span>'
+        : (r.sig.kind === 'binary'
+            ? (r.raw ? 'yes' : 'no')
+            : (typeof r.raw === 'number'
+                ? (Math.abs(r.raw) >= 1000 ? Math.round(r.raw).toLocaleString() : r.raw.toFixed(2))
+                : escapeHtml(String(r.raw))));
+      const dirArrow = r.sig.direction === 'negative' ? '↓' : '↑';
+      const dirColor = r.sig.direction === 'negative' ? '#f85149' : '#3fb950';
+      const contribPct = (r.contribution * 100).toFixed(2);
+      const contribColor = r.contribution > 0 ? '#3fb950' : (r.contribution < 0 ? '#f85149' : '#8b949e');
+      html += `
+        <tr style="${rowStyle}">
+          <td style="padding:3px 6px; color:#c9d1d9;">${escapeHtml(r.name)}${insig ? ' <span style="font-size:9px; color:#8b949e;">(insig)</span>' : ''}</td>
+          <td style="padding:3px 6px; color:#c9d1d9;">${rawDisplay}</td>
+          <td style="padding:3px 6px; color:#c9d1d9;">${r.normalized.toFixed(2)}${r.is_imputed ? ' <span style="font-size:9px; color:#8b949e;">imp</span>' : ''}</td>
+          <td style="padding:3px 6px; color:${dirColor};">${dirArrow}</td>
+          <td style="padding:3px 6px; color:#c9d1d9;">${r.sig.weight.toFixed(3)}</td>
+          <td style="padding:3px 6px; text-align:right; color:${contribColor};">${contribPct}</td>
+        </tr>
+      `;
+    }
+
+    html += `
+        </tbody>
+      </table>
+      <div style="font-size:10px; color:#8b949e; padding:6px 0 0; line-height:1.4;">
+        <strong>Norm</strong> is the signal value rescaled to [0,1] (5th–95th
+        percentile range, clipped). <strong>Dir</strong> ↓ means the signal is
+        flipped (high raw → low contribution). <strong>Contrib</strong> is the
+        signal's contribution to the final score in points out of 100 (sums
+        to ≈ ${p.score.toFixed(2)}). Values marked <em>imp</em> were null;
+        treated as 0.5 (continuous) or 0 (binary). Greyed-out rows were
+        statistically insignificant in the regression — they don't contribute.
       </div>
     `;
-    return el;
+    host.innerHTML = html;
+
+    // Sanity check: the recomputed total should match the stored score
+    // within rounding. Surface a warning in dev console if it drifts.
+    if (Math.abs(recomputed - p.score) > 0.05) {
+      console.warn(`Score breakdown drift: stored=${p.score} recomputed=${recomputed}`);
+    }
   }
 
   function sectionFinancials(p) {
