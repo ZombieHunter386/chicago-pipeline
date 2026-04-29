@@ -600,7 +600,7 @@ def write_analysis_report(
     path.write_text("\n".join(lines))
 
 
-SCORING_VERSION_PREFIX = "1.0.0"
+SCORING_VERSION_PREFIX = "1.1.0"
 
 
 def analyze(
