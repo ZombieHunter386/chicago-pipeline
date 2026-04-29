@@ -199,10 +199,12 @@ def score_consolidation_groups(db_path: Path,
 
 
 def score(db_path: Path, scoring_yaml_path: Path) -> None:
-    """Orchestrate: load config + score every parcel in the DB."""
+    """Orchestrate: load config + score every parcel + every consolidation group."""
     cfg = load_scoring_config(scoring_yaml_path)
-    n = score_parcels(db_path, cfg)
-    print(f"Scored {n:,} parcels with version {cfg.version}")
+    n_parcels = score_parcels(db_path, cfg)
+    n_groups = score_consolidation_groups(db_path, cfg)
+    print(f"Scored {n_parcels:,} parcels and {n_groups:,} consolidation groups "
+          f"with version {cfg.version}")
 
 
 def _cli(argv: list[str] | None = None) -> int:

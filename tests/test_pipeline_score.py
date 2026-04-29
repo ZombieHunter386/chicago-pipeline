@@ -488,3 +488,50 @@ def test_score_consolidation_groups_handles_empty_table(tmp_path):
     db_path = _build_score_db(tmp_path, [])
     cfg = score.ScoringConfig(version="1.1.0-test", top_n=20, signals=[])
     assert score.score_consolidation_groups(db_path, cfg) == 0
+
+
+def test_score_orchestrator_writes_both_parcels_and_groups(tmp_path):
+    parcels = [
+        {"pin": "PIN_A", "lot_size_sf": 3000.0, "is_condo_unit": 0},
+        {"pin": "PIN_B", "lot_size_sf": 4000.0, "is_condo_unit": 0},
+    ]
+    db_path = _build_score_db(tmp_path, parcels)
+    from pipeline.db import get_connection
+    conn = get_connection(db_path)
+    try:
+        conn.execute("""
+            INSERT INTO consolidation_groups
+              (group_id, pins, combined_lot_size_sf, combined_building_sf,
+               owner_name, detected_date)
+            VALUES (1, ?, 7000.0, NULL, 'TEST OWNER', '2026-04-28')
+        """, (_json.dumps(["PIN_A", "PIN_B"]),))
+        conn.commit()
+    finally:
+        conn.close()
+
+    yaml_path = tmp_path / "scoring.yaml"
+    _write_yaml(yaml_path, {
+        "version": "1.1.0-test",
+        "generated_at": "2026-04-28T12:00:00+00:00",
+        "top_n": 20,
+        "signals": {
+            "lot_size_sf": {"kind": "continuous", "weight": 1.0,
+                            "direction": "positive",
+                            "normalization": {"min": 0.0, "max": 10000.0},
+                            "insignificant": False},
+        },
+    })
+    score.score(db_path=db_path, scoring_yaml_path=yaml_path)
+
+    conn = get_connection(db_path)
+    try:
+        n_parcels_scored = conn.execute(
+            "SELECT COUNT(*) FROM parcels WHERE score IS NOT NULL"
+        ).fetchone()[0]
+        n_groups_scored = conn.execute(
+            "SELECT COUNT(*) FROM consolidation_groups WHERE score IS NOT NULL"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert n_parcels_scored == 2
+    assert n_groups_scored == 1
