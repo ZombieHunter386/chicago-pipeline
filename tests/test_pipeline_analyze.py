@@ -394,7 +394,10 @@ def test_write_scoring_yaml_roundtrip(tmp_path):
 def test_write_analysis_report_contains_required_sections(tmp_path):
     funnel = {"total_parcels": 67677, "after_exempt_drop": 67000,
               "after_no_zone_drop": 66800, "after_pd_drop": 64781,
-              "after_condo_unit_drop": 17753}
+              "after_condo_unit_drop": 17753,
+              "after_constituent_drop": 14021,
+              "consolidation_groups_added": 6864,
+              "after_consolidation_group_add": 20885}
     distributions = [
         {"signal": "lot_size_sf", "kind": "continuous",
          "n_positive": 120, "n_negative": 17633,
@@ -451,6 +454,12 @@ def test_write_analysis_report_contains_required_sections(tmp_path):
     assert "Caveats" in body
     assert "tax_delinquent" in body  # the missing signal must be called out
     assert "snapshot" in body.lower()  # snapshot-fidelity caveat
+    # Funnel includes consolidation-group counts and constituent-drop step
+    assert "After dropping constituents" in body
+    assert "Consolidation groups added" in body
+    assert "14,021" in body  # after constituent drop
+    assert "6,864" in body
+    assert "20,885" in body  # final training-set total
 
 
 def test_analyze_end_to_end_writes_yaml_and_report(tmp_path):

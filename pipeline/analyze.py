@@ -505,7 +505,10 @@ def write_analysis_report(
     a(f"| After dropping tax-exempt | {funnel['after_exempt_drop']:,} |")
     a(f"| After dropping no-zone-class | {funnel['after_no_zone_drop']:,} |")
     a(f"| After dropping PD-zoned | {funnel['after_pd_drop']:,} |")
-    a(f"| After dropping condo units | **{funnel['after_condo_unit_drop']:,}** (training set) |")
+    a(f"| After dropping condo units | {funnel['after_condo_unit_drop']:,} |")
+    a(f"| After dropping constituents of training groups | {funnel.get('after_constituent_drop', funnel['after_condo_unit_drop']):,} |")
+    a(f"| Consolidation groups added | +{funnel.get('consolidation_groups_added', 0):,} |")
+    a(f"| Training set total | **{funnel.get('after_consolidation_group_add', funnel['after_condo_unit_drop']):,}** |")
     a("")
 
     # Imputation rates
