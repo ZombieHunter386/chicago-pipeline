@@ -15,6 +15,7 @@ import yaml
 from sklearn.linear_model import LogisticRegression
 
 from pipeline.config import GeographyConfig
+from pipeline.consolidation_features import derive_group_features
 from pipeline.db import get_connection
 from pipeline.spatial import (
     DEFAULT_GEO_RADIUS_FT,
@@ -128,21 +129,29 @@ def build_training_table(
     db_path: Path,
     positive_pins: dict[str, int],
 ) -> pd.DataFrame:
-    """Assemble one (features, label) row per eligible parcel.
+    """Assemble one (features, label) row per eligible parcel and per
+    consolidation group.
 
-    Eligibility filter (in this order):
+    Eligibility filter for parcels (in this order):
       1. has zone_class
-      2. zone_class is not PD/PMD (no max_far ordinance available)
-      3. is_condo_unit = 0  (units excluded; building reps kept)
+      2. zone_class is not PD/PMD
+      3. is_condo_unit = 0
       4. PIN not in raw_assessor_exempt
+      5. PIN is NOT a constituent of any consolidation group in the
+         training set (each redevelopment event contributes exactly once
+         — through the group row, not also through the constituent row).
+         This drop is training-only — the parcels table is untouched.
+
+    Consolidation groups are added unconditionally — they have their own
+    aggregated features regardless of the constituent parcels' filters.
+    Identifier: pin = f"group:{id}" so the DataFrame schema is unchanged.
+    Group label = 1 if any constituent PIN is in positive_pins, else 0.
 
     NULL handling after eligibility:
-      - continuous: fill with training-set median
+      - continuous: fill with training-set median (parcels + groups together)
       - binary: fill with 0
-
-    Imputation rates are attached to df.attrs['imputation_rates'] for the
-    report writer.
     """
+    import json as _json
     columns = [s[0] for s in SIGNALS]
     select_cols = ["pin", "zone_class", "is_condo_unit"] + columns
     placeholders = ", ".join(select_cols)
@@ -156,10 +165,24 @@ def build_training_table(
                 "SELECT pin FROM raw_assessor_exempt"
             ).fetchall()
         }
+        group_records = [dict(r) for r in conn.execute(
+            "SELECT group_id, pins FROM consolidation_groups"
+        ).fetchall()]
     finally:
         conn.close()
 
-    eligible = []
+    # Collect every PIN that's a constituent of a consolidation group.
+    # These get dropped from the PARCEL training rows — they'll contribute
+    # via their group row instead. (Multi-group constituents are vanishingly
+    # rare — a flat set lookup is fine.)
+    constituent_pins: set[str] = set()
+    for gr in group_records:
+        for pin in _json.loads(gr["pins"]):
+            constituent_pins.add(pin)
+    group_ids = [gr["group_id"] for gr in group_records]
+
+    # Parcel eligibility funnel
+    eligible_after_condo = []  # passes the original 4 filters
     for r in rows:
         if not r["zone_class"]:
             continue
@@ -169,28 +192,63 @@ def build_training_table(
             continue
         if r["pin"] in exempt_pins:
             continue
-        eligible.append(r)
+        eligible_after_condo.append(r)
 
-    # Track the eligibility funnel so the report can show it.
+    # Apply the constituent drop (training-only — DOES NOT touch the parcels table).
+    eligible = [r for r in eligible_after_condo
+                if r["pin"] not in constituent_pins]
+
     funnel = {
         "total_parcels": len(rows),
-        "after_exempt_drop": sum(1 for r in rows if r["pin"] not in exempt_pins),
-        "after_no_zone_drop": sum(1 for r in rows
-                                  if r["pin"] not in exempt_pins and r["zone_class"]),
-        "after_pd_drop": sum(1 for r in rows
-                             if r["pin"] not in exempt_pins and r["zone_class"]
-                             and not _is_pd_zone(r["zone_class"])),
-        "after_condo_unit_drop": len(eligible),
+        "after_exempt_drop":   sum(1 for r in rows if r["pin"] not in exempt_pins),
+        "after_no_zone_drop":  sum(1 for r in rows
+                                   if r["pin"] not in exempt_pins and r["zone_class"]),
+        "after_pd_drop":       sum(1 for r in rows
+                                   if r["pin"] not in exempt_pins and r["zone_class"]
+                                   and not _is_pd_zone(r["zone_class"])),
+        "after_condo_unit_drop": len(eligible_after_condo),
+        "after_constituent_drop": len(eligible),
+        "consolidation_groups_added": len(group_ids),
+        "after_consolidation_group_add": len(eligible) + len(group_ids),
     }
 
-    if not eligible:
+    # Build the DataFrame from parcels + groups.
+    parcel_rows_for_df = [
+        {**{c: r[c] for c in ["pin"] + columns}}
+        for r in eligible
+    ]
+
+    group_rows_for_df = []
+    for gid in group_ids:
+        features = derive_group_features(gid, db_path)
+        # Group label = 1 if any constituent had a qualifying permit
+        constituent_pins_for_group = _group_constituent_pins(db_path, gid)
+        label = int(any(p in positive_pins for p in constituent_pins_for_group))
+        group_rows_for_df.append({
+            "pin": f"group:{gid}",
+            **features,
+            "_group_label_override": label,
+        })
+
+    if not parcel_rows_for_df and not group_rows_for_df:
         df = pd.DataFrame(columns=["pin", "label"] + columns)
-        df.attrs["imputation_rates"] = {}
         df.attrs["funnel"] = funnel
+        df.attrs["imputation_rates"] = {}
         return df
 
-    df = pd.DataFrame(eligible)[["pin"] + columns].copy()
-    df["label"] = df["pin"].isin(positive_pins).astype(int)
+    df = pd.DataFrame(parcel_rows_for_df + group_rows_for_df)[
+        ["pin"] + columns + (["_group_label_override"] if group_rows_for_df else [])
+    ].copy()
+
+    # Label: parcels via positive_pins membership; groups via override column
+    if "_group_label_override" in df.columns:
+        df["label"] = df["pin"].isin(positive_pins).astype(int)
+        # For group rows, _group_label_override holds the precomputed label
+        group_mask = df["pin"].str.startswith("group:")
+        df.loc[group_mask, "label"] = df.loc[group_mask, "_group_label_override"].astype(int)
+        df = df.drop(columns=["_group_label_override"])
+    else:
+        df["label"] = df["pin"].isin(positive_pins).astype(int)
 
     imputation_rates: dict[str, dict[str, float]] = {}
     n = len(df)
@@ -200,14 +258,27 @@ def build_training_table(
         imputation_rates[col] = {"n_imputed": int(nulls), "pct": pct}
         if kind == "continuous":
             median = df[col].median()
-            # If every value is NULL, fall back to 0 — flagged in report.
             df[col] = df[col].fillna(0 if pd.isna(median) else median)
-        else:  # binary
+        else:
             df[col] = df[col].fillna(0).astype(int)
 
-    df.attrs["imputation_rates"] = imputation_rates
     df.attrs["funnel"] = funnel
+    df.attrs["imputation_rates"] = imputation_rates
     return df
+
+
+def _group_constituent_pins(db_path: Path, group_id: int) -> list[str]:
+    """Read a consolidation group's pins JSON array."""
+    import json
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT pins FROM consolidation_groups WHERE group_id = ?",
+            (group_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return json.loads(row["pins"]) if row else []
 
 
 def compare_distributions(df: pd.DataFrame) -> list[dict]:

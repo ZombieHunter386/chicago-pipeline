@@ -556,3 +556,98 @@ bbox:
     assert result.returncode == 0, f"stderr: {result.stderr}"
     assert scoring.exists()
     assert report.exists()
+
+
+import json as _json
+
+
+def test_build_training_table_includes_groups_and_drops_their_constituents(tmp_path):
+    """A consolidation group becomes one training row. Its constituent PINs
+    are DROPPED from the parcel-row training set so each redevelopment event
+    contributes exactly once. Constituent PINs are NOT removed from the
+    parcels table — this drop is training-only."""
+    parcels = [
+        _parcel_row("14210010010000", lot_size_sf=3000.0,
+                    address="100 W FAKE ST", lat=41.93, lng=-87.65),
+        _parcel_row("14210010020000", lot_size_sf=4000.0,
+                    address="102 W FAKE ST", lat=41.93, lng=-87.65),
+        # Unrelated parcel, kept as a regular parcel row
+        _parcel_row("14210010030000", lot_size_sf=5000.0,
+                    address="200 W OTHER ST", lat=41.94, lng=-87.66),
+    ]
+    db_path = _build_analyze_db(tmp_path, parcels)
+    # Add a consolidation group whose constituents are PIN 1 and PIN 2
+    from pipeline.db import get_connection
+    conn = get_connection(db_path)
+    try:
+        conn.execute("""
+            INSERT INTO consolidation_groups
+              (group_id, pins, combined_lot_size_sf, combined_building_sf,
+               owner_name, detected_date)
+            VALUES (1, ?, 7000.0, NULL, 'TEST OWNER', '2026-04-28')
+        """, (_json.dumps(["14210010010000", "14210010020000"]),))
+        conn.commit()
+    finally:
+        conn.close()
+
+    # PIN 1 had a qualifying permit; PIN 2 did not.
+    positives = {"14210010010000": 2018}
+    df = analyze.build_training_table(db_path, positives)
+
+    # PIN_1 and PIN_2 are CONSTITUENTS of group 1 → dropped from parcel rows.
+    # PIN_3 stays. Group 1 is added. Total = 1 parcel + 1 group = 2 rows.
+    assert len(df) == 2
+    pins = df["pin"].tolist()
+    assert "14210010010000" not in pins   # constituent dropped
+    assert "14210010020000" not in pins   # constituent dropped
+    assert "14210010030000" in pins        # not in any group → kept
+    assert "group:1" in pins
+
+    by_pin = df.set_index("pin")
+    # The group is positive because constituent PIN 1 is in positive_pins
+    assert by_pin.loc["group:1", "label"] == 1
+    # PIN 3 is negative (no permit, not in any group)
+    assert by_pin.loc["14210010030000", "label"] == 0
+
+    # Group's lot_size_sf is the COMBINED value (7000)
+    assert by_pin.loc["group:1", "lot_size_sf"] == 7000.0
+
+    # Important: the parcels table itself is unchanged — the constituents
+    # still exist there with their original data. This is verified by
+    # querying parcels directly:
+    conn = get_connection(db_path)
+    try:
+        n_parcels = conn.execute("SELECT COUNT(*) FROM parcels").fetchone()[0]
+    finally:
+        conn.close()
+    assert n_parcels == 3  # all three parcels still in the table
+
+
+def test_build_training_table_funnel_records_constituent_drop(tmp_path):
+    """The funnel exposes both the constituent-drop count and the
+    consolidation-groups-added count so the report can show the math."""
+    parcels = [
+        _parcel_row("14210010010000"),  # constituent of group 1 → dropped
+        _parcel_row("14210010020000"),  # constituent of group 1 → dropped
+        _parcel_row("14210010030000"),  # standalone → kept
+    ]
+    db_path = _build_analyze_db(tmp_path, parcels)
+    from pipeline.db import get_connection
+    conn = get_connection(db_path)
+    try:
+        conn.execute("""
+            INSERT INTO consolidation_groups
+              (group_id, pins, combined_lot_size_sf, combined_building_sf,
+               owner_name, detected_date)
+            VALUES (1, ?, 7000.0, NULL, 'TEST OWNER', '2026-04-28')
+        """, (_json.dumps(["14210010010000", "14210010020000"]),))
+        conn.commit()
+    finally:
+        conn.close()
+
+    df = analyze.build_training_table(db_path, positive_pins={})
+    funnel = df.attrs["funnel"]
+    assert funnel["after_condo_unit_drop"] == 3
+    assert funnel["after_constituent_drop"] == 1  # 2 of 3 dropped (PIN_1, PIN_2)
+    assert funnel["consolidation_groups_added"] == 1
+    assert funnel["after_consolidation_group_add"] == 2  # 1 parcel + 1 group
