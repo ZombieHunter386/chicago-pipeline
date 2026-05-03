@@ -3,9 +3,9 @@ generated_at: '2026-04-29T00:21:45+00:00'
 top_n: 20
 signals:
   lot_size_sf:
-    weight: 0.3974
+    weight: 0.1
     kind: continuous
-    direction: negative
+    direction: positive
     normalization:
       min: 2088.795099414015
       max: 117562.2500982736
@@ -13,23 +13,23 @@ signals:
   hold_duration_years:
     weight: 0.0941
     kind: continuous
-    direction: negative
+    direction: positive
     normalization:
       min: 1.57
       max: 23.4
     insignificant: false
   max_far:
-    weight: 0.1575
+    weight: 0.1
     kind: continuous
-    direction: negative
+    direction: positive
     normalization:
       min: 0.9
       max: 6.6
     insignificant: false
   far_gap_delta:
-    weight: 0.0176
+    weight: 0.2176
     kind: continuous
-    direction: negative
+    direction: positive
     normalization:
       min: -0.23642
       max: 1.1112399999999987
@@ -45,7 +45,7 @@ signals:
   estimated_annual_tax:
     weight: 0.0186
     kind: continuous
-    direction: positive
+    direction: negative
     normalization:
       min: 4188.52
       max: 180503.79599999983
@@ -59,7 +59,7 @@ signals:
       max: 145.47946747239726
     insignificant: true
   cta_distance_ft:
-    weight: 0.0129
+    weight: 0.129
     kind: continuous
     direction: positive
     normalization:
