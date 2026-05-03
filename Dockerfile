@@ -1,15 +1,17 @@
 # Production image for Render / any Docker-friendly host.
 #
 # Notes:
-#   - python:3.14 (Debian Bookworm-based) — matches local dev's interpreter
-#   - shapely / pyproj install via prebuilt wheels (no apt deps required for
-#     the webapp's runtime path; pipeline.spatial isn't loaded at request time)
+#   - python:3.13 (Debian Bookworm-based). NOT 3.14 — shapely 2.0.6 / geopandas
+#     1.0.1 / pandas 2.2.3 / scikit-learn 1.7.2 don't have cp314 wheels yet,
+#     and source builds need libgeos-dev which we don't install. cp313 wheels
+#     exist for all of them, so the image installs in ~30s instead of failing
+#     after ~8 min of compile.
 #   - `scripts/init_db.sh` runs at container start to fetch the DB onto the
 #     persistent disk if it isn't there already
 #   - gunicorn binds to ${PORT} which Render injects (default 8000 for local)
 #   - Production webapp reads config from env vars, not argparse — see
 #     webapp/wsgi.py
-FROM python:3.14
+FROM python:3.13
 
 WORKDIR /app
 
