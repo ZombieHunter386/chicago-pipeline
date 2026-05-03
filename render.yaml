@@ -1,0 +1,35 @@
+# Render Blueprint — describes the deployed service so Render can provision
+# it from the repo with one click. See https://render.com/docs/blueprint-spec
+#
+# To deploy:
+#   1. Push this file to master.
+#   2. In Render dashboard: New + → Blueprint → connect this repo.
+#   3. Render reads this file, prompts for the three secrets below.
+#   4. Click Apply; first deploy takes ~3-5 min (builds Docker image, downloads DB).
+services:
+  - type: web
+    name: chicago-pipeline
+    runtime: docker
+    plan: starter           # $7/mo, always-on, no cold starts
+    region: oregon          # closest to us-west; pick another if elsewhere
+    branch: master
+    autoDeploy: true        # rebuild on every push to master
+    healthCheckPath: /
+    disk:
+      name: chicago-pipeline-data
+      mountPath: /data      # matches DB_PATH default in Dockerfile
+      sizeGB: 1             # ~$0.25/mo. The DB is 619 MB; 1 GB has headroom.
+    envVars:
+      # Sensitive: set in Render dashboard, never committed.
+      - key: WEBAPP_USER
+        sync: false
+      - key: WEBAPP_PASSWORD
+        sync: false
+      - key: DB_DOWNLOAD_URL
+        sync: false
+      # Non-sensitive overrides. The Dockerfile already sets sane defaults
+      # for these but listing them here makes them visible in the dashboard.
+      - key: DB_PATH
+        value: /data/full.alt.db
+      - key: SCORING_YAML_PATH
+        value: config/scoring_alternatives/lot_size_sf_positive.yaml

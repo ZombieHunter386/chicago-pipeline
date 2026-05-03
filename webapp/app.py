@@ -18,4 +18,10 @@ def create_app(db_path: Path, feature_outreach: bool = False,
 
     from webapp import routes
     routes.register(app)
+
+    # HTTP basic auth — activated when WEBAPP_USER + WEBAPP_PASSWORD env
+    # vars are set (production). No-op in local dev when env vars are absent.
+    from webapp.auth import init_auth
+    init_auth(app)
+
     return app
