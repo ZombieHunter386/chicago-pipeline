@@ -31,5 +31,7 @@ services:
       # for these but listing them here makes them visible in the dashboard.
       - key: DB_PATH
         value: /data/full.alt.db
+      # Must match the YAML used to score the DB you upload to R2 — the score
+      # breakdown panel reads weights from this file at request time.
       - key: SCORING_YAML_PATH
-        value: config/scoring_alternatives/lot_size_sf_positive.yaml
+        value: config/scoring.yaml

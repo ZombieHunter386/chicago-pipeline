@@ -1,14 +1,16 @@
 # Deploying to Render
 
 Stand up a publicly-reachable, password-protected instance of the webapp on
-Render with the SQLite database stored on Backblaze B2. Total time: ~30 min
+Render with the SQLite database stored on Cloudflare R2. Total time: ~30 min
 the first time, ~5 min for subsequent updates (which auto-deploy on push).
 
 **End state:** `https://chicago-pipeline-XXXX.onrender.com` prompts for a
 username + password, then renders the same UI you use locally.
 
-**Cost:** ~$8/mo total — Render Starter plan ($7/mo) + 1 GB persistent disk
-(~$0.25/mo, billed as ~$1) + Backblaze B2 free tier ($0/mo for the DB).
+**Cost:** ~$7.25/mo today — Render Starter plan ($7/mo) + 1 GB persistent
+disk (~$0.25/mo) + Cloudflare R2 free tier ($0/mo). Scales to ~$10-12/mo
+if the DB grows to all of Chicago / Cook County (R2 stays free up to 10 GB,
+disk grows at $0.25/GB/mo).
 
 ---
 
@@ -29,40 +31,52 @@ You don't need to edit any of these for the standard deploy.
 
 ---
 
-## Step 1 — Upload the database to Backblaze B2 (free, ~10 min)
+## Step 1 — Upload the database to Cloudflare R2 (free, ~10 min)
 
-The 619 MB SQLite DB is too large for git. We host it on Backblaze B2's free
-tier (10 GB free storage; the DB downloads once at first deploy).
+The 619 MB SQLite DB is too large for git. We host it on Cloudflare R2's
+free tier (10 GB storage free, **zero egress fees forever** — Render
+redownloads cost $0 even on disk wipes).
 
-1. **Create a free Backblaze account** at https://www.backblaze.com/cloud-storage
-   - Click "Get Free Object Storage" → sign up with email
-   - Verify the email address
+1. **Create a free Cloudflare account** at https://dash.cloudflare.com/sign-up
+   - You don't need a domain or any paid plan
+   - Verify the email
 
-2. **Create a public bucket:**
-   - Sign in to https://secure.backblaze.com/
-   - Left nav → "Buckets" → "Create a Bucket"
-   - **Bucket Unique Name:** `chicago-pipeline-data` (must be globally unique;
-     prepend something like your initials if taken — e.g. `hh-chicago-pipeline-data`)
-   - **Files in Bucket are:** Public
-   - **Default Encryption:** Disabled (default)
-   - **Object Lock:** Disabled (default)
-   - Click "Create a Bucket"
+2. **Enable R2** (one-time, requires payment-card on file even though the
+   free tier covers everything):
+   - Cloudflare dashboard → left nav → "R2 Object Storage"
+   - Click "Purchase R2 Plan" / "Enable R2"
+   - Add a card; you won't be charged unless you exceed 10 GB or hit
+     paid-tier API ops (roughly impossible for our use case)
 
-3. **Upload `data/full.alt.db`:**
-   - Click into the bucket you just created
-   - Click "Upload/Download" → drag-and-drop `data/full.alt.db` from
-     `/Users/hunterheyman/Claude/chicago-pipeline/data/`
-   - Wait for the 619 MB upload to complete (~5–10 min depending on your
-     connection)
+3. **Create a public bucket:**
+   - R2 dashboard → "Create bucket"
+   - **Bucket name:** `chicago-pipeline-db` (lowercase, hyphens; must be
+     unique within your account)
+   - **Location:** "Automatic" (Cloudflare picks the nearest region)
+   - Click "Create bucket"
 
-4. **Get the public download URL:**
-   - Once uploaded, click the file's name in the bucket listing
-   - Look for the "Friendly URL" field — copy this URL. It looks like:
-     `https://f005.backblazeb2.com/file/chicago-pipeline-data/full.alt.db`
-   - Verify it works: paste the URL into a browser; it should start
-     downloading the file. (Cancel the download once you've confirmed.)
+4. **Enable public access on the bucket:**
+   - Click into the bucket → "Settings" tab
+   - Under "Public Access" → "R2.dev subdomain" → "Allow Access"
+   - Confirm "Allow"
+   - Cloudflare gives you a public URL like:
+     `https://pub-1234567890abcdef.r2.dev`
+   - Copy this base URL — you'll combine it with the file name in step 6
 
-5. **Save this URL** — you'll paste it into Render in Step 3.
+5. **Upload `data/full.alt.db`:**
+   - Bucket → "Objects" tab → "Upload" → pick
+     `/Users/hunterheyman/Claude/chicago-pipeline/data/full.alt.db`
+   - Wait for the 619 MB upload (~3-8 min depending on your connection)
+   - The web upload caps at ~5 GB; for larger files use `wrangler` or
+     `rclone` (see "Updating the database" at the bottom)
+
+6. **Build the full download URL** by combining the base URL + file name:
+   - Pattern: `<r2.dev base URL>/full.alt.db`
+   - Example: `https://pub-1234567890abcdef.r2.dev/full.alt.db`
+   - **Verify it works:** paste into a browser; it should start downloading
+     the file. (Cancel after a few MB once you've confirmed it's the DB.)
+
+7. **Save this URL** — you'll paste it into Render in Step 3.
 
 ---
 
@@ -95,7 +109,7 @@ tier (10 GB free storage; the DB downloads once at first deploy).
    |---|---|
    | `WEBAPP_USER` | (your friend's username — e.g. `David`) |
    | `WEBAPP_PASSWORD` | (your friend's password — never commit this anywhere) |
-   | `DB_DOWNLOAD_URL` | the Backblaze friendly URL from Step 1 |
+   | `DB_DOWNLOAD_URL` | the R2 public URL from Step 1.6 |
 
    These values stay in Render's encrypted secret store. They're not in the
    repo and not in this guide for that reason.
@@ -106,21 +120,21 @@ tier (10 GB free storage; the DB downloads once at first deploy).
 
 ## Step 4 — Watch the first deploy
 
-The first deploy takes ~3–5 minutes:
+The first deploy takes ~3-5 minutes:
 
 1. **Build phase (~2 min):** Render pulls the repo, builds the Docker image
    (`pip install -r requirements.txt` is the slow step).
 2. **Disk provisioning:** Render attaches a 1 GB persistent disk at `/data`.
 3. **Container start:** the entrypoint runs `scripts/init_db.sh`, which
-   downloads the 619 MB DB from Backblaze (~30–60 sec on Render's network),
-   then starts gunicorn.
+   downloads the 619 MB DB from R2 (~30-90 sec on Render's network), then
+   starts gunicorn.
 4. **Health check:** Render hits `GET /` to confirm the app is responding.
 
 Watch the deploy log live in the Render dashboard. Successful boot looks
 like:
 ```
-[init_db] Downloading DB from https://f005.backblazeb2.com/... to /data/full.alt.db ...
-[init_db] Downloaded 649069568 bytes to /data/full.alt.db
+[init_db] Downloading DB from https://pub-XXXX.r2.dev/full.alt.db to /data/full.alt.db ...
+[init_db] Downloaded 648900608 bytes to /data/full.alt.db
 [2026-05-02 22:14:01 +0000] [1] [INFO] Starting gunicorn 23.0.0
 [2026-05-02 22:14:01 +0000] [1] [INFO] Listening at: http://0.0.0.0:10000
 ```
@@ -165,13 +179,27 @@ Lakeview area; click any pin or row in the left panel to see details."
 
 `render.yaml` has `autoDeploy: true`. Every push to `master` triggers a new
 build + deploy. The DB on `/data` is **not** affected by deploys — it
-persists across restarts. To force a re-download (e.g. after re-running
-`pipeline.score` and uploading a new DB to Backblaze):
+persists across restarts.
 
-1. Upload the new file to Backblaze (overwrite the existing one — same URL)
-2. In Render dashboard → service → "Disks" → delete `chicago-pipeline-data`
-   (it'll re-provision empty on the next deploy)
-3. Trigger a manual deploy
+## Updating the database
+
+After re-running the local pipeline (cleanup → consolidate → condo_rollup →
+score), the DB on R2 needs a refresh and Render needs to be told to
+re-download it.
+
+1. **Re-upload to R2:**
+   - R2 dashboard → bucket → "Upload" → pick the new `data/full.alt.db`
+   - Choose "Replace" when asked. The URL stays the same.
+
+2. **Force Render to re-download** (it skips download if the disk has the
+   file already):
+   - Render dashboard → service → "Disks" → delete `chicago-pipeline-data`
+     (it'll re-provision empty on the next deploy)
+   - Trigger a manual deploy: "Manual Deploy" → "Deploy latest commit"
+   - First boot of the new disk will run `init_db.sh` and pull the fresh DB
+
+A faster option for big DBs (skip the manual deletion): SSH into the Render
+service via "Shell" tab and `rm /data/full.alt.db`, then restart.
 
 ---
 
@@ -188,13 +216,18 @@ Render dashboard → service → "Environment" tab → edit `WEBAPP_PASSWORD` �
 |---|---|---|
 | Render web service | Starter ($7/mo, always-on, no cold starts) | $7.00 |
 | Render disk | 1 GB persistent | ~$0.25 |
-| Backblaze B2 storage | 619 MB / 10 GB free | $0.00 |
-| Backblaze B2 egress | ~620 MB on first deploy + redeploys | $0.00 (3× storage free) |
+| Cloudflare R2 storage | 619 MB / 10 GB free | $0.00 |
+| Cloudflare R2 egress | unlimited free, forever | $0.00 |
 | **Total** | | **~$7.25/mo** |
 
+If the DB grows to all of Chicago (~10 GB), increase `disk.sizeGB` in
+`render.yaml` to 10 — Render disk goes to ~$2.50/mo, R2 stays free, total
+~$9.50/mo. Past 10 GB on R2 it's $0.015/GB/mo (so 20 GB = $0.15/mo over
+the free tier).
+
 Render bills monthly and pro-rates by the day. You can pause the service
-in the Render dashboard at any time to stop billing (the disk + Backblaze
-data persist; redeploy when you want it live again).
+in the Render dashboard at any time to stop billing (the disk + R2 data
+persist; redeploy when you want it live again).
 
 ---
 
@@ -204,6 +237,7 @@ If you want to tear it down:
 
 1. Render dashboard → service → "Settings" → "Delete Web Service"
 2. Render dashboard → "Disks" → delete `chicago-pipeline-data`
-3. Backblaze → bucket → "Delete all files" → "Delete bucket"
+3. Cloudflare R2 → bucket → "Manage Objects" → select all → "Delete"
+4. Cloudflare R2 → bucket → "Settings" → "Delete bucket"
 
-Once all three are deleted, you stop being billed.
+Once all four are deleted, you stop being billed.
