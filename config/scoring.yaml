@@ -27,7 +27,7 @@ signals:
       max: 6.6
     insignificant: false
   far_gap_delta:
-    weight: 0.2176
+    weight: 0.2565
     kind: continuous
     direction: positive
     normalization:
