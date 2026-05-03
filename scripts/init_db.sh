@@ -37,9 +37,6 @@ fi
 mkdir -p "$(dirname "$DB_PATH")"
 echo "[init_db] Downloading DB from ${DB_DOWNLOAD_URL} to ${DB_PATH} ..."
 # --fail: non-2xx returns become curl errors (so set -e fires)
-# --location: follow redirects (Backblaze hands out 302s)
-# --retry: handle transient network blips during the 619 MB download
-# --fail: non-2xx returns become curl errors (so set -e fires)
 # --location: follow redirects (R2 may hand out 302s if the URL changes)
 # --retry: handle transient network blips during the multi-hundred-MB download
 curl --fail --location --retry 5 --retry-delay 5 --retry-connrefused \

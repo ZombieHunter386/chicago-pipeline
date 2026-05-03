@@ -27,7 +27,10 @@ COPY . .
 # Persistent disk mount point. The host (Render) maps /data to a 1 GB volume
 # so the SQLite DB survives redeploys.
 ENV DB_PATH=/data/full.alt.db
-ENV SCORING_YAML_PATH=config/scoring_alternatives/lot_size_sf_positive.yaml
+# Canonical scoring YAML — must match the YAML used to score the DB.
+# render.yaml overrides this at runtime; keeping it consistent here protects
+# against the env var failing to attach.
+ENV SCORING_YAML_PATH=config/scoring.yaml
 ENV PORT=8000
 
 EXPOSE 8000

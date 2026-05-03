@@ -1,0 +1,38 @@
+# Keep the Docker build context lean — these are large or don't belong in
+# the production image. Render builds from git so .gitignored files aren't
+# in scope, but local `docker build` would otherwise pull in 619 MB+ DB
+# files that we never want shipped in the image (DB lives on Render's
+# persistent disk, downloaded at boot via init_db.sh).
+
+# Local DB files (gitignored too, but excluded here for local-build safety)
+data/*.db
+data/*.db-journal
+data/*.db.backup
+data/*.csv
+data/*.log
+
+# Python cruft
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Env / venv
+.env
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Git metadata isn't useful inside the image
+.git/
+.gitignore
+.dockerignore
+
+# Tests aren't needed at runtime
+tests/
+
+# Docs
+*.md
