@@ -491,6 +491,14 @@ _LATER_COLUMNS = {
         ("vacant_violations_amount_due", "REAL"),
         ("most_recent_vacant_violation_date", "TEXT"),
         ("far_gap_delta", "REAL"),
+        # Derived from property_class — true for low-utilization land classes
+        # (parking lots, etc.). Used in scoring as the "underutilized site"
+        # signal that replaced is_llc.
+        ("is_low_util_land", "INTEGER"),
+        # Count of condo unit constituents whose source building_sf was NULL
+        # at rollup time. >0 means the rep's summed building_sf understates
+        # the building total — UI surfaces this as "(SF incomplete)".
+        ("condo_units_missing_sf_count", "INTEGER"),
     ),
     # combined_building_sf was added to consolidation_groups in a prior commit
     # but the migration was never written; CREATE TABLE IF NOT EXISTS doesn't

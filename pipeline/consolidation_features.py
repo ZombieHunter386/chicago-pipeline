@@ -32,7 +32,7 @@ _QUERY_COLUMNS = (
     "cta_distance_ft", "appeal_count", "open_violations_count",
     "years_since_last_permit", "vacant_violations_count",
     "scofflaw_appearances_count",
-    "is_absentee", "is_llc", "is_scofflaw",
+    "is_absentee", "is_llc", "is_scofflaw", "is_low_util_land",
     "allows_multifamily_by_right", "max_far",
     "assessed_land", "assessed_total",
 )
@@ -139,6 +139,7 @@ def derive_group_features(group_id: int, db_path: Path) -> dict:
         "is_absentee":             _binary_max(constituents, "is_absentee"),
         "is_llc":                  _binary_max(constituents, "is_llc"),
         "is_scofflaw":             _binary_max(constituents, "is_scofflaw"),
+        "is_low_util_land":        _binary_max(constituents, "is_low_util_land"),
         "allows_multifamily_by_right": _binary_max(constituents, "allows_multifamily_by_right"),
         "max_far":                 max_far_val,
         "far_gap_delta":           far_gap,

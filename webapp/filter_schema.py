@@ -49,7 +49,7 @@ def _enrich_filter(conn: sqlite3.Connection, f: dict) -> dict:
         out["min"] = row["mn"]
         out["max"] = row["mx"]
 
-    elif ftype == "dropdown":
+    elif ftype in ("dropdown", "multiselect"):
         rows = conn.execute(
             f"SELECT DISTINCT {col} AS v FROM parcels "
             f"WHERE {col} IS NOT NULL AND {col} != '' ORDER BY {col}"

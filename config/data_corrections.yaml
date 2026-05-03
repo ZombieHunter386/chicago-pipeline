@@ -1,0 +1,58 @@
+# Manual data corrections — applied by `python -m pipeline.cleanup` after
+# every assessor re-fetch. Edit this file (not the Python) when you spot
+# bad data. Corrections persist across re-fetches because cleanup runs as
+# the first pipeline step after fetch_all.
+#
+# Workflow whenever you re-pull data from chicago / cook county sources:
+#   1. python -m pipeline.fetch_all ...      (raw fetch — may overwrite)
+#   2. python -m pipeline.cleanup --db ...   (re-applies these corrections)
+#   3. python -m pipeline.consolidate ...
+#   4. python -m pipeline.condo_rollup ...
+#   5. python -m pipeline.score ...
+#
+# The cleanup step is idempotent — running it twice is a no-op the second
+# time. If you skip cleanup after a re-fetch, manual corrections will be
+# lost on any row whose assessor value changed.
+
+building_sf:
+  # Set to NULL — known-wrong values where the true SF is unknown.
+  # Better to display "no data" than a wrong number.
+  set_null:
+    - pin: "14291140040000"
+      address: "3015 N SOUTHPORT AVE"
+      reason: "Reported 1 SF on a class-297, $964K, year_built 2025 record — clear data entry error"
+    - pin: "14211000040000"
+      address: "3933 N CLARENDON AVE"
+      reason: "Manual review — class 391, building_sf wrong"
+    - pin: "14302000480000"
+      address: "1931 W BELMONT AVE"
+      reason: "Manual review — class 597, building_sf wrong"
+    - pin: "14194350520000"
+      address: "1650 W BELMONT AVE"
+      reason: "Manual review — class 597, building_sf wrong"
+    - pin: "14281000130000"
+      address: "709 W BELMONT AVE"
+      reason: "Manual review — class 391, building_sf wrong"
+    - pin: "14281240140000"
+      address: "2850 N SHERIDAN RD"
+      reason: "Manual review — class 391, building_sf wrong"
+    - pin: "14281240150000"
+      address: "2850 N SHERIDAN RD"
+      reason: "Manual review — class 391, building_sf wrong"
+
+  # Set to 0 for every parcel in these property classes — confirmed as
+  # parking lots / no enclosed building. Both NULL and populated assessor
+  # values are overwritten so a re-fetch can't reintroduce phantom SF.
+  set_zero_by_class:
+    - "590"  # commercial parking lots — manual review of all populated rows confirmed parking
+
+scoring:
+  # Property classes flagged as low-utilization land for the
+  # `is_low_util_land` scoring signal (replaces is_llc — 16.9% weight).
+  # Parking lots and underbuilt parcels are strong redevelopment targets.
+  #   522 = residential parking lots
+  #   590 = commercial parking lots
+  #   597 = residential parking (lots within larger holdings)
+  #   391 = industrial parking
+  #   278 = commercial parking
+  low_util_land_classes: ["522", "590", "597", "391", "278"]

@@ -69,20 +69,24 @@ def _category_clause(visible_categories: set[str], top_n_threshold: float | None
         parts.append("stage = 'outreach'")
     if "consolidated" in visible_categories:
         parts.append("(stage IS NULL OR stage <> 'outreach') "
-                     "AND consolidation_group_id IS NOT NULL")
+                     "AND (consolidation_group_id IS NOT NULL "
+                     "OR is_condo_building = 1)")
     if "top" in visible_categories and top_n_threshold is not None:
         parts.append("(stage IS NULL OR stage <> 'outreach') "
                      "AND consolidation_group_id IS NULL "
+                     "AND COALESCE(is_condo_building, 0) = 0 "
                      f"AND score >= {top_n_threshold}")
     if "other" in visible_categories:
         # "other" = none of the above buckets.
         if top_n_threshold is not None:
             parts.append("(stage IS NULL OR stage <> 'outreach') "
                          "AND consolidation_group_id IS NULL "
+                         "AND COALESCE(is_condo_building, 0) = 0 "
                          f"AND (score IS NULL OR score < {top_n_threshold})")
         else:
             parts.append("(stage IS NULL OR stage <> 'outreach') "
-                         "AND consolidation_group_id IS NULL")
+                         "AND consolidation_group_id IS NULL "
+                         "AND COALESCE(is_condo_building, 0) = 0")
     if not parts:
         # Caller passed only category names that need a threshold we don't
         # have — fall through to "match nothing" rather than silently match
@@ -128,8 +132,15 @@ def build_parcel_query(
         "SELECT pin, address, lat, lng, owner_name, property_class, lot_size_sf, "
         "year_built, zone_class, hold_duration_years, "
         "is_absentee, is_llc, tax_delinquent, open_violations_count, "
-        "far_gap, stage, listing_status, score, consolidation_group_id, "
-        "is_condo_building, condo_unit_count, "
+        "far_gap, far_gap_delta, max_far, min_lot_area_per_unit, max_units_allowed, "
+        "stage, listing_status, score, consolidation_group_id, "
+        "is_condo_building, condo_unit_count, condo_units_missing_sf_count, "
+        "building_sf, cta_distance_ft, "
+        "assessed_total, estimated_annual_tax, tax_increase_pct_5yr, "
+        "land_building_ratio, last_sale_price, last_sale_date, "
+        "years_since_last_permit, appeal_count, oldest_violation_age_days, "
+        "first_seen_date, last_updated_date, "
+        "scofflaw_appearances_count, vacant_violations_amount_due, "
         "unit_count, is_scofflaw, vacant_violations_count "
         f"FROM parcels {where_sql} "
         f"ORDER BY {order_by} "
@@ -178,6 +189,15 @@ def _build_where(
         if isinstance(value, bool):
             # tri-state: True -> col = 1, False -> col = 0, absent -> no filter
             clauses.append(f"{col} = {1 if value else 0}")
+        elif isinstance(value, (list, tuple)):
+            # multi-select: col IN (?, ?, ?). Empty list -> match nothing
+            # so an explicit "no values selected" doesn't silently match all.
+            if not value:
+                clauses.append("1 = 0")
+            else:
+                placeholders = ",".join("?" * len(value))
+                clauses.append(f"{col} IN ({placeholders})")
+                params.extend(value)
         elif isinstance(value, dict):
             # range: {"min": x, "max": y}  -- either may be absent
             mn = value.get("min")

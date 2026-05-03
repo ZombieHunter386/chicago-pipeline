@@ -24,7 +24,9 @@ def test_dropdown_filter_has_distinct_values(populated_db_path):
     schema = build_filter_schema(populated_db_path, CONFIG)
     prop = next(g for g in schema["filter_groups"] if g["group"] == "Property")
     pc = next(f for f in prop["filters"] if f["column"] == "property_class")
-    assert pc["type"] == "dropdown"
+    # property_class is rendered as multiselect (multi-pick checkbox list);
+    # both dropdown and multiselect get distinct values enriched the same way.
+    assert pc["type"] in ("dropdown", "multiselect")
     assert isinstance(pc["options"], list)
     assert len(pc["options"]) > 0
 

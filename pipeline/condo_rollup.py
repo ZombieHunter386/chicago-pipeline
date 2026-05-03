@@ -37,7 +37,8 @@ def rollup_condos(db_path: Path) -> int:
         # Reset all condo flags so this is idempotent.
         conn.execute(
             "UPDATE parcels SET is_condo_unit = 0, is_condo_building = 0, "
-            "       condo_unit_count = NULL"
+            "       condo_unit_count = NULL, "
+            "       condo_units_missing_sf_count = NULL"
         )
 
         # For previous reps, the snapshot's summed columns reflect the prior
@@ -102,18 +103,21 @@ def rollup_condos(db_path: Path) -> int:
             sum_ab = sum((r["assessed_building"] or 0) for r in rows) or None
             sum_et = sum((r["estimated_annual_tax"] or 0) for r in rows) or None
             sum_bldg_sf = sum((r["building_sf"] or 0) for r in rows) or None
+            missing_sf = sum(1 for r in rows if r["building_sf"] is None)
 
             conn.execute(
                 "UPDATE parcels SET "
                 "  is_condo_building = 1, "
                 "  condo_unit_count = ?, "
+                "  condo_units_missing_sf_count = ?, "
                 "  assessed_total = ?, "
                 "  assessed_land = ?, "
                 "  assessed_building = ?, "
                 "  estimated_annual_tax = ?, "
                 "  building_sf = ? "
                 "WHERE pin = ?",
-                (len(rows), sum_at, sum_al, sum_ab, sum_et, sum_bldg_sf, rep_pin),
+                (len(rows), missing_sf, sum_at, sum_al, sum_ab, sum_et,
+                 sum_bldg_sf, rep_pin),
             )
             if unit_pins:
                 placeholders = ",".join("?" * len(unit_pins))

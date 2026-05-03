@@ -53,7 +53,7 @@ filter_groups:
     filters:
       - column: property_class
         label: Property class
-        type: dropdown
+        type: multiselect
       - column: lot_size_sf
         label: Lot size (SF)
         type: range

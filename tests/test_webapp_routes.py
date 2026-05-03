@@ -143,13 +143,14 @@ def test_api_map_data_is_geojson(pop_client):
 
 def test_api_map_data_marks_consolidated(pop_client, populated_db_path):
     # The consolidated count returned by the API should match the count of
-    # parcels with consolidation_group_id set in the DB (intersected with
-    # parcels that have lat/lng, since features without coords are dropped).
+    # parcels in the "consolidated" bucket: those with consolidation_group_id
+    # OR is_condo_building = 1 (condo buildings ride along in the consolidated
+    # layer so the user only has to remember one rollup concept).
     expected = _scalar(
         populated_db_path,
         """
         SELECT COUNT(*) FROM parcels
-        WHERE consolidation_group_id IS NOT NULL
+        WHERE (consolidation_group_id IS NOT NULL OR is_condo_building = 1)
           AND lat IS NOT NULL
           AND lng IS NOT NULL
           AND is_condo_unit = 0

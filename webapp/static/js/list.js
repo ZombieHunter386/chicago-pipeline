@@ -72,6 +72,45 @@
     });
   }
 
+  // Map a sort column name to the equivalent field on a consolidation-group
+  // payload. Groups don't carry per-parcel fields like year_built, so unmapped
+  // fields return undefined → group sinks to the bottom of the sort.
+  const GROUP_FIELD_MAP = {
+    score: 'score',
+    lot_size_sf: 'combined_lot_size_sf',
+    building_sf: 'combined_building_sf',
+    assessed_total: 'sum_assessed_total',
+    estimated_annual_tax: 'sum_estimated_annual_tax',
+    hold_duration_years: 'longest_hold_years',
+    year_built: 'oldest_year_built',
+  };
+
+  function valueFor(item, field) {
+    if (!field) return item.payload?.score;
+    if (item.kind === 'group') {
+      const mapped = GROUP_FIELD_MAP[field];
+      return mapped ? item.payload[mapped] : undefined;
+    }
+    return item.payload[field];
+  }
+
+  function sortMergedQueue(arr) {
+    const field = sortBy || 'score';
+    const dir = (sortBy ? sortDir : 'desc') === 'asc' ? 1 : -1;
+    arr.sort((a, b) => {
+      const av = valueFor(a, field);
+      const bv = valueFor(b, field);
+      const aNull = av == null, bNull = bv == null;
+      if (aNull && !bNull) return 1;
+      if (!aNull && bNull) return -1;
+      if (aNull && bNull) return 0;
+      if (typeof av === 'string' || typeof bv === 'string') {
+        return String(av).localeCompare(String(bv)) * dir;
+      }
+      return (av - bv) * dir;
+    });
+  }
+
   async function loadList({replace}) {
     const myId = ++reqId;
     const qs = window.filterStateToQuery();
@@ -116,37 +155,18 @@
         }
       } catch (_) { /* non-fatal — parcels still render below */ }
 
-      // Merge groups + parcels into one ranked queue ordered by score
-      // (NULLs sink). Subsequent 'Load more' clicks walk through this queue
-      // — and fetch more parcels when the queue is exhausted.
       mergedQueue = [
-        ...groups.map(g => ({ kind: 'group', score: g.score, payload: g })),
-        ...data.parcels.map(p => ({ kind: 'parcel', score: p.score, payload: p })),
+        ...groups.map(g => ({ kind: 'group', payload: g })),
+        ...data.parcels.map(p => ({ kind: 'parcel', payload: p })),
       ];
-      mergedQueue.sort((a, b) => {
-        const aNull = a.score == null, bNull = b.score == null;
-        if (aNull && !bNull) return 1;
-        if (!aNull && bNull) return -1;
-        if (aNull && bNull) return 0;
-        return b.score - a.score;
-      });
+      sortMergedQueue(mergedQueue);
     } else {
-      // 'Load more' — append next page of parcels to the queue so pagination
-      // continues to interleave with any remaining groups.
       data.parcels.forEach(p => {
-        mergedQueue.push({ kind: 'parcel', score: p.score, payload: p });
+        mergedQueue.push({ kind: 'parcel', payload: p });
       });
-      // Re-sort the tail (everything we haven't rendered yet) so newly-added
-      // parcels land in the right rank order relative to remaining groups.
       const head = mergedQueue.slice(0, renderedFromQueue);
       const tail = mergedQueue.slice(renderedFromQueue);
-      tail.sort((a, b) => {
-        const aNull = a.score == null, bNull = b.score == null;
-        if (aNull && !bNull) return 1;
-        if (!aNull && bNull) return -1;
-        if (aNull && bNull) return 0;
-        return b.score - a.score;
-      });
+      sortMergedQueue(tail);
       mergedQueue = head.concat(tail);
     }
 
@@ -222,7 +242,9 @@
     }
     if (p.is_condo_building) {
       const u = p.condo_unit_count || 0;
-      tags.push(`<span class="tag stage">Condo · ${u} unit${u === 1 ? '' : 's'}</span>`);
+      const miss = p.condo_units_missing_sf_count || 0;
+      const sfNote = miss > 0 ? ` · SF incomplete (${miss}/${u})` : '';
+      tags.push(`<span class="tag stage">Condo · ${u} unit${u === 1 ? '' : 's'}${sfNote}</span>`);
     }
     if (p.stage && p.stage !== 'scored') {
       tags.push(`<span class="tag stage">${escapeHtml(capitalize(p.stage))}</span>`);

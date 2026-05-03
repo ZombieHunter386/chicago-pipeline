@@ -406,13 +406,18 @@ def _parse_filters(args) -> dict[str, Any]:
     """Parse query string into the dict shape parcel_query expects.
 
     Conventions:
-      ?is_absentee=true        -> {"is_absentee": True}
-      ?property_class=211      -> {"property_class": "211"}
-      ?hold_duration_years.min=20  -> {"hold_duration_years": {"min": 20.0}}
+      ?is_absentee=true                         -> {"is_absentee": True}
+      ?property_class=211                       -> {"property_class": "211"}
+      ?property_class=211&property_class=212    -> {"property_class": ["211","212"]}
+      ?hold_duration_years.min=20               -> {"hold_duration_years": {"min": 20.0}}
       ?hold_duration_years.max=30
     """
     filters: dict[str, Any] = {}
-    for key, value in args.items():
+    seen_keys: set[str] = set()
+    for key in args.keys():
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
         if key in {"limit", "offset", "stage", "sort", "dir", "include_condo_units"}:
             continue
 
@@ -421,8 +426,8 @@ def _parse_filters(args) -> dict[str, Any]:
             if col not in ALLOWED_FILTER_COLUMNS or suffix not in {"min", "max"}:
                 continue
             try:
-                num = float(value)
-            except ValueError:
+                num = float(args.get(key))
+            except (ValueError, TypeError):
                 continue
             filters.setdefault(col, {})[suffix] = num
             continue
@@ -430,6 +435,12 @@ def _parse_filters(args) -> dict[str, Any]:
         if key not in ALLOWED_FILTER_COLUMNS:
             continue
 
+        values = args.getlist(key)
+        if len(values) > 1:
+            filters[key] = [v for v in values if v != ""]
+            continue
+
+        value = values[0]
         if value.lower() in {"true", "1"}:
             filters[key] = True
         elif value.lower() in {"false", "0"}:
@@ -444,12 +455,17 @@ def _map_category(row: dict, top_n_threshold: float | None = None) -> str:
     """Pin color bucket. 'top' fires when the row's score is at or above
     the top-N threshold (default: top 20 by score across the parcels table).
     Bucket precedence: outreach > consolidated > top > other. Listed parcels
-    are surfaced separately in the outreach stage."""
+    are surfaced separately in the outreach stage.
+
+    Condo buildings (is_condo_building=1) fall in the 'consolidated' bucket
+    alongside owner-portfolio groups so the user only has to remember one
+    rollup concept."""
     if row.get("listing_status") == "listed":
         return "listed"
     if row.get("stage") == "outreach":
         return "outreach"
-    if row.get("consolidation_group_id") is not None:
+    if (row.get("consolidation_group_id") is not None
+            or row.get("is_condo_building")):
         return "consolidated"
     score = row.get("score")
     if (top_n_threshold is not None and score is not None

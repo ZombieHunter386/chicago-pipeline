@@ -184,6 +184,54 @@ function renderFilter(f) {
     };
 
     ctrl.appendChild(select);
+  } else if (f.type === 'multiselect') {
+    ctrl.style.flexDirection = 'column';
+    ctrl.style.alignItems = 'flex-start';
+    ctrl.style.gap = '4px';
+    const label = document.createElement('label');
+    label.style.fontSize = '10px';
+    label.style.color = '#8b949e';
+    label.textContent = f.label;
+    ctrl.appendChild(label);
+
+    const box = document.createElement('div');
+    box.className = 'filter-multiselect';
+    box.dataset.col = col;
+    box.style.maxHeight = '160px';
+    box.style.overflowY = 'auto';
+    box.style.border = '1px solid #30363d';
+    box.style.borderRadius = '4px';
+    box.style.padding = '4px 6px';
+    box.style.width = '100%';
+    box.style.boxSizing = 'border-box';
+
+    (f.options || []).forEach(o => {
+      const row = document.createElement('label');
+      row.style.display = 'flex';
+      row.style.alignItems = 'center';
+      row.style.gap = '6px';
+      row.style.fontSize = '11px';
+      row.style.color = '#c9d1d9';
+      row.style.padding = '2px 0';
+      row.style.cursor = 'pointer';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = o;
+      cb.dataset.col = col;
+      cb.addEventListener('change', () => {
+        const checked = [...box.querySelectorAll('input:checked')].map(i => i.value);
+        if (checked.length === 0) delete window.FilterState.filters[col];
+        else window.FilterState.filters[col] = checked;
+        updateActiveCount();
+        window.dispatchEvent(new CustomEvent('filterchange'));
+      });
+      row.appendChild(cb);
+      const span = document.createElement('span');
+      span.textContent = o;
+      row.appendChild(span);
+      box.appendChild(row);
+    });
+    ctrl.appendChild(box);
   } else if (f.type === 'text_search') {
     ctrl.style.flexDirection = 'column';
     ctrl.style.alignItems = 'flex-start';
@@ -224,6 +272,7 @@ function wireFilterToggle() {
   document.getElementById('clear-filters').onclick = () => {
     window.FilterState.filters = {};
     panel.querySelectorAll('input[type="checkbox"]').forEach(i => i.checked = false);
+    panel.querySelectorAll('.filter-multiselect input').forEach(i => i.checked = false);
     panel.querySelectorAll('input[type="number"], input[type="text"]').forEach(i => i.value = '');
     panel.querySelectorAll('select').forEach(s => s.value = '');
     panel.querySelectorAll('.tristate-group').forEach(g => {
@@ -244,7 +293,9 @@ window.filterStateToQuery = function() {
   for (const [col, val] of Object.entries(window.FilterState.filters)) {
     if (val === true) params.set(col, 'true');
     else if (val === false) params.set(col, 'false');
-    else if (typeof val === 'object') {
+    else if (Array.isArray(val)) {
+      val.forEach(v => params.append(col, v));
+    } else if (typeof val === 'object') {
       if (val.min != null) params.set(`${col}.min`, val.min);
       if (val.max != null) params.set(`${col}.max`, val.max);
     } else {
