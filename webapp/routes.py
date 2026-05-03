@@ -80,6 +80,13 @@ def register(app: Flask) -> None:
             feature_outreach=current_app.config["FEATURE_OUTREACH"],
         )
 
+    @app.get("/health")
+    def health():
+        # Unauthenticated liveness probe for Render's health checker (the
+        # auth middleware whitelists this path). Plain text, no DB hit, so
+        # it stays cheap and never gets blocked by a slow query.
+        return "ok", 200, {"Content-Type": "text/plain"}
+
     @app.get("/api/filters")
     def api_filters():
         schema = build_filter_schema(

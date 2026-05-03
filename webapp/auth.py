@@ -19,6 +19,12 @@ from flask import Flask, Response, request
 
 _REALM = "Chicago Pipeline"
 
+# Paths that bypass basic auth — Render's health-check probe doesn't send
+# credentials, so / would always 401 and the deploy would never go live.
+# /health is a tiny "OK" endpoint added in routes.py; nothing sensitive
+# about its existence leaking.
+_AUTH_EXEMPT_PATHS = {"/health"}
+
 
 def _credentials_configured() -> bool:
     return bool(os.environ.get("WEBAPP_USER")) and bool(
@@ -43,6 +49,8 @@ def _challenge() -> Response:
 
 
 def _before_request_auth():
+    if request.path in _AUTH_EXEMPT_PATHS:
+        return None
     auth = request.authorization
     if auth is None or not _check(auth.username, auth.password):
         return _challenge()

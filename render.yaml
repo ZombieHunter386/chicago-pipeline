@@ -14,7 +14,9 @@ services:
     region: oregon          # closest to us-west; pick another if elsewhere
     branch: master
     autoDeploy: true        # rebuild on every push to master
-    healthCheckPath: /
+    # /health is unauthenticated; / requires basic auth, which Render's
+    # internal probe doesn't send (would always 401 → never go live).
+    healthCheckPath: /health
     disk:
       name: chicago-pipeline-data
       mountPath: /data      # matches DB_PATH default in Dockerfile
