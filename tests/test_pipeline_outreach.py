@@ -185,6 +185,9 @@ def test_parcel_context_builds_merge_vars(db: sqlite3.Connection) -> None:
     assert ctx["address"] == "123 W Main St"
     assert ctx["score"] == "82.5"
     assert ctx["my_name"] == "Hunter"
+    # Missing columns are rendered as the empty string, not None or absent
+    assert ctx["ward"] == ""
+    assert ctx["building_sf"] == ""
 
 
 def test_parcel_context_handles_llc_owner_first_name(db: sqlite3.Connection) -> None:

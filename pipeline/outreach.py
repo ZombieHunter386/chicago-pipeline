@@ -118,6 +118,10 @@ def upsert_contact(
     Only non-None fields are written — passing email=None on an update preserves
     the existing email value. This matters because the UI may upsert just an
     email today, then just a phone later.
+
+    Requires the caller's connection to have `conn.row_factory = sqlite3.Row`
+    (the standard for this project — see webapp/routes.py:_conn and
+    pipeline/db.py:get_connection).
     """
     row = conn.execute(
         "SELECT contact_id FROM contacts WHERE pin = ? LIMIT 1", (pin,)
