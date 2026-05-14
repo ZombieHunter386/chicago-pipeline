@@ -34,6 +34,7 @@ def test_sanitize_strips_outreach_keeps_parcels(tmp_path: Path) -> None:
     result = subprocess.run(
         [sys.executable, "scripts/sanitize_db_for_r2.py", str(src), str(dst)],
         capture_output=True, text=True, check=True,
+        cwd=str(Path(__file__).resolve().parent.parent),
     )
     assert dst.exists(), f"output DB not created. stderr={result.stderr}"
 
@@ -53,6 +54,34 @@ def test_sanitize_refuses_to_overwrite_source(tmp_path: Path) -> None:
     result = subprocess.run(
         [sys.executable, "scripts/sanitize_db_for_r2.py", str(src), str(src)],
         capture_output=True, text=True,
+        cwd=str(Path(__file__).resolve().parent.parent),
     )
     assert result.returncode != 0
     assert "same path" in (result.stderr + result.stdout).lower()
+
+
+def _make_parcels_only_db(path: Path) -> None:
+    """Build a minimal DB with only a parcels table (no outreach/contacts/waves)."""
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE parcels (pin TEXT PRIMARY KEY, owner_name TEXT);
+        INSERT INTO parcels VALUES ('123', 'Acme LLC');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_sanitize_missing_tables_cleans_up_dst(tmp_path: Path) -> None:
+    src = tmp_path / "src.db"
+    _make_parcels_only_db(src)
+    dst = tmp_path / "out.db"
+
+    result = subprocess.run(
+        [sys.executable, "scripts/sanitize_db_for_r2.py", str(src), str(dst)],
+        capture_output=True, text=True,
+        cwd=str(Path(__file__).resolve().parent.parent),
+    )
+    assert result.returncode != 0, "expected non-zero exit when tables are missing"
+    assert not dst.exists(), f"dst was left on disk after failure: {dst}"

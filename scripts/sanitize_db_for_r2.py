@@ -31,6 +31,10 @@ def sanitize(src: Path, dst: Path) -> None:
             "VACUUM;"
         )
         conn.commit()
+    except Exception as exc:
+        conn.close()
+        dst.unlink(missing_ok=True)
+        raise SystemExit(f"ERROR: failed to sanitize {dst}: {exc}")
     finally:
         conn.close()
     print(f"Sanitized DB written to {dst}")
