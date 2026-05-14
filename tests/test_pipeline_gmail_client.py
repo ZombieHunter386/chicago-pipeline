@@ -144,7 +144,7 @@ def test_send_email_builds_mime_with_subject_and_body(tmp_path: Path) -> None:
         users.messages.return_value = messages
         service.users.return_value = users
         build_mock.return_value = service
-        creds_cls.from_authorized_user_info.return_value = MagicMock()
+        creds_cls.from_authorized_user_info.return_value = MagicMock(expired=False)
 
         result = send_email(
             token_path=token,
