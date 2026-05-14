@@ -1,11 +1,14 @@
 from __future__ import annotations
+import re
 import sqlite3
 from contextlib import closing
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from flask import Flask, abort, current_app, jsonify, render_template, request
+from flask import Flask, abort, current_app, jsonify, redirect, render_template, request, url_for
 from werkzeug.exceptions import HTTPException
 
+from pipeline import outreach as outreach_module, gmail_client
 from webapp.filter_schema import build_filter_schema
 from webapp.parcel_query import (
     ALLOWED_CATEGORIES,
@@ -385,6 +388,236 @@ def register(app: Flask) -> None:
         body["members"] = members
         body["zoning_summary"] = _summarize_zoning(members, body)
         return jsonify(body)
+
+    # ============================================================
+    # Outreach (Plan 4) — registered only when FEATURE_OUTREACH is on
+    # ============================================================
+    if app.config["FEATURE_OUTREACH"]:
+
+        EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+        ALLOWED_STAGES = {"scored", "outreach", "responded", "introduced", "dead"}
+        ALLOWED_RESPONSE_TYPES = {"responded", "not_interested", "wrong_owner", "other"}
+
+        def _now_iso() -> str:
+            return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        def _load_outreach_config() -> dict:
+            return outreach_module.load_templates(
+                Path(app.config["OUTREACH_TEMPLATES_PATH"])
+            )
+
+        def _parcel_or_404(conn, pin: str):
+            if not pin.isdigit() or len(pin) != 14:
+                abort(404)
+            row = conn.execute(
+                "SELECT * FROM parcels WHERE pin = ?", (pin,)
+            ).fetchone()
+            if row is None:
+                abort(404)
+            return dict(row)
+
+        @app.get("/api/parcels/<pin>/outreach")
+        def api_parcel_outreach(pin: str):
+            with closing(_conn()) as conn:
+                _parcel_or_404(conn, pin)
+                contact = conn.execute(
+                    "SELECT * FROM contacts WHERE pin = ? LIMIT 1", (pin,)
+                ).fetchone()
+                outreach_rows = outreach_module.list_outreach_for_parcel(conn, pin)
+            return jsonify({
+                "pin": pin,
+                "contact": dict(contact) if contact else None,
+                "outreach": [dict(r) for r in outreach_rows],
+                "gmail_connected": gmail_client.is_connected(
+                    Path(app.config["GMAIL_TOKEN_PATH"])
+                ),
+                "sender_address": app.config.get("GMAIL_SENDER_ADDRESS") or "",
+            })
+
+        @app.get("/api/outreach/templates")
+        def api_outreach_templates():
+            cfg = _load_outreach_config()
+            pin = request.args.get("pin")
+            templates = []
+            ctx = {}
+            if pin and pin.isdigit() and len(pin) == 14:
+                with closing(_conn()) as conn:
+                    row = conn.execute(
+                        "SELECT * FROM parcels WHERE pin = ?", (pin,)
+                    ).fetchone()
+                    if row is not None:
+                        ctx = outreach_module.parcel_context(dict(row), cfg["defaults"])
+            for name, tpl in cfg["templates"].items():
+                templates.append({
+                    "name": name,
+                    "label": tpl.get("label", name),
+                    "subject": tpl.get("subject", ""),
+                    "body": tpl.get("body", ""),
+                    "rendered_subject": outreach_module.render_template(
+                        tpl.get("subject", ""), ctx
+                    ) if ctx else None,
+                    "rendered_body": outreach_module.render_template(
+                        tpl.get("body", ""), ctx
+                    ) if ctx else None,
+                })
+            return jsonify({"templates": templates})
+
+        @app.post("/api/contacts/upsert")
+        def api_contacts_upsert():
+            data = request.get_json(silent=True) or {}
+            pin = data.get("pin", "")
+            email = data.get("email")
+            if not pin.isdigit() or len(pin) != 14:
+                abort(400, "invalid pin")
+            if email is not None and not EMAIL_RE.match(email):
+                abort(400, "invalid email")
+            with closing(_conn()) as conn:
+                _parcel_or_404(conn, pin)
+                cid = outreach_module.upsert_contact(
+                    conn, pin=pin,
+                    email=email,
+                    name=data.get("name"),
+                    phone=data.get("phone"),
+                    role=data.get("role"),
+                    source=data.get("source", "manual"),
+                )
+                row = conn.execute(
+                    "SELECT * FROM contacts WHERE contact_id = ?", (cid,)
+                ).fetchone()
+            return jsonify({"contact": dict(row)})
+
+        @app.post("/api/outreach/send")
+        def api_outreach_send():
+            data = request.get_json(silent=True) or {}
+            pin = data.get("pin", "")
+            to = data.get("to", "")
+            subject = data.get("subject")
+            body = data.get("body")
+            if not pin.isdigit() or len(pin) != 14:
+                abort(400, "invalid pin")
+            if not EMAIL_RE.match(to):
+                abort(400, "invalid recipient email")
+            if not subject or body is None:
+                abort(400, "subject and body are required")
+
+            subject = outreach_module.sanitize_subject(subject)
+            sender = app.config.get("GMAIL_SENDER_ADDRESS") or ""
+            if not sender:
+                abort(503, "GMAIL_SENDER_ADDRESS is not set")
+
+            with closing(_conn()) as conn:
+                _parcel_or_404(conn, pin)
+                cid = outreach_module.upsert_contact(
+                    conn, pin=pin, email=to, source="manual"
+                )
+
+                try:
+                    result = gmail_client.send_email(
+                        token_path=Path(app.config["GMAIL_TOKEN_PATH"]),
+                        sender=sender, to=to,
+                        subject=subject, body=body,
+                    )
+                except gmail_client.GmailNotConnectedError as e:
+                    abort(503, f"Gmail not connected: {e}")
+
+                oid = outreach_module.create_outreach_record(
+                    conn, pin=pin, contact_id=cid,
+                    channel="email", subject=subject, body=body,
+                    sent_date=_now_iso(),
+                )
+                # Persist the Gmail message id in `notes` (cheap; avoids a
+                # schema change to add a dedicated column).
+                conn.execute(
+                    "UPDATE outreach SET notes = ? WHERE outreach_id = ?",
+                    (f"gmail_message_id={result.get('id','')}", oid),
+                )
+                # Auto-transition: scored → outreach on first successful send.
+                conn.execute(
+                    "UPDATE parcels SET stage = 'outreach' "
+                    "WHERE pin = ? AND (stage IS NULL OR stage = 'scored')",
+                    (pin,),
+                )
+                conn.commit()
+
+            return jsonify({
+                "outreach_id": oid,
+                "gmail_message_id": result.get("id", ""),
+                "gmail_thread_id": result.get("threadId", ""),
+            })
+
+        @app.post("/api/outreach/<int:outreach_id>/mark-replied")
+        def api_outreach_mark_replied(outreach_id: int):
+            data = request.get_json(silent=True) or {}
+            response_type = data.get("response_type", "responded")
+            if response_type not in ALLOWED_RESPONSE_TYPES:
+                abort(400, "invalid response_type")
+            with closing(_conn()) as conn:
+                row = conn.execute(
+                    "SELECT outreach_id, pin FROM outreach WHERE outreach_id = ?",
+                    (outreach_id,),
+                ).fetchone()
+                if row is None:
+                    abort(404)
+                outreach_module.mark_replied(
+                    conn, outreach_id,
+                    response_date=_now_iso(),
+                    response_type=response_type,
+                )
+                # If this was the first reply, also bump parcel stage to "responded".
+                conn.execute(
+                    "UPDATE parcels SET stage = 'responded' "
+                    "WHERE pin = ? AND stage = 'outreach'",
+                    (row["pin"],),
+                )
+                conn.commit()
+            return jsonify({"ok": True})
+
+        @app.post("/api/parcels/<pin>/stage")
+        def api_parcel_set_stage(pin: str):
+            data = request.get_json(silent=True) or {}
+            stage = data.get("stage")
+            if stage not in ALLOWED_STAGES:
+                abort(400, "invalid stage")
+            with closing(_conn()) as conn:
+                _parcel_or_404(conn, pin)
+                conn.execute(
+                    "UPDATE parcels SET stage = ? WHERE pin = ?", (stage, pin)
+                )
+                conn.commit()
+            return jsonify({"ok": True, "stage": stage})
+
+        # ----- OAuth -----
+
+        @app.get("/api/oauth/start")
+        def api_oauth_start():
+            client_path = Path(app.config["GMAIL_CLIENT_SECRETS_PATH"])
+            if not client_path.exists():
+                abort(503,
+                      f"Gmail client secrets not found at {client_path}. "
+                      "Download from Google Cloud Console and save the file there.")
+            redirect_uri = url_for("api_oauth_callback", _external=True)
+            url, _state = gmail_client.build_authorization_url(
+                client_secrets_path=client_path, redirect_uri=redirect_uri,
+            )
+            return redirect(url)
+
+        @app.get("/api/oauth/callback")
+        def api_oauth_callback():
+            client_path = Path(app.config["GMAIL_CLIENT_SECRETS_PATH"])
+            if not client_path.exists():
+                abort(503, "Gmail client secrets not found")
+            redirect_uri = url_for("api_oauth_callback", _external=True)
+            try:
+                gmail_client.exchange_code_for_token(
+                    client_secrets_path=client_path,
+                    redirect_uri=redirect_uri,
+                    authorization_response_url=request.url,
+                    token_path=Path(app.config["GMAIL_TOKEN_PATH"]),
+                )
+            except Exception as e:
+                return f"OAuth callback failed: {e}", 500
+            # Send the user back to the main UI.
+            return redirect(url_for("index"))
 
     @app.get("/_test_explode")
     def _test_explode():

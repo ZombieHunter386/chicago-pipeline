@@ -13,7 +13,7 @@ def main() -> None:
                              "(default: config/scoring.yaml relative to project root)")
     parser.add_argument("--port", type=int, default=5000)
     parser.add_argument("--outreach", action="store_true",
-                        help="Enable outreach UI (Plan 4 — not implemented)")
+                        help="Enable outreach UI + write endpoints (local only)")
     parser.add_argument("--debug", action="store_true",
                         help="Enable Flask debug mode (exposes Werkzeug debugger; localhost only)")
     args = parser.parse_args()
@@ -21,8 +21,20 @@ def main() -> None:
     if not args.db.exists():
         raise SystemExit(f"Database not found: {args.db}")
 
-    app = create_app(db_path=args.db, feature_outreach=args.outreach,
-                     scoring_yaml_path=args.scoring_yaml)
+    # Outreach config reads from env so a developer can override paths without
+    # touching code. All env vars are optional; defaults are baked into create_app.
+    import os
+    gmail_client = os.environ.get("GMAIL_OAUTH_CLIENT_PATH")
+    gmail_token = os.environ.get("GMAIL_TOKEN_PATH")
+    gmail_sender = os.environ.get("GMAIL_SENDER_ADDRESS")
+
+    app = create_app(
+        db_path=args.db, feature_outreach=args.outreach,
+        scoring_yaml_path=args.scoring_yaml,
+        gmail_client_secrets_path=Path(gmail_client) if gmail_client else None,
+        gmail_token_path=Path(gmail_token) if gmail_token else None,
+        gmail_sender_address=gmail_sender,
+    )
     app.run(host="127.0.0.1", port=args.port, debug=args.debug)
 
 
