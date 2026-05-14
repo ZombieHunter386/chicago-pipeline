@@ -56,6 +56,42 @@ def test_load_credentials_raises_when_disconnected(tmp_path: Path) -> None:
         load_credentials(tmp_path / "missing.json")
 
 
+def test_load_credentials_refreshes_expired_token_and_repersists(tmp_path: Path) -> None:
+    """When the stored access token is expired but a refresh_token exists,
+    load_credentials must call .refresh() and re-save the updated JSON to disk.
+    Re-persistence matters because the access token (and sometimes scopes/expiry)
+    rotates on refresh — losing those means the next send call uses stale data.
+    """
+    p = tmp_path / "token.json"
+    save_token(p, {
+        "refresh_token": "rt", "client_id": "cid", "client_secret": "s",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "scopes": ["https://www.googleapis.com/auth/gmail.send"],
+    })
+
+    fake_creds = MagicMock()
+    fake_creds.expired = True
+    fake_creds.refresh_token = "rt"
+    # Configure to_json() to return a string (json.loads needs str/bytes)
+    fake_creds.to_json.return_value = json.dumps({
+        "refresh_token": "rt", "client_id": "cid", "client_secret": "s",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "scopes": ["https://www.googleapis.com/auth/gmail.send"],
+        "token": "new-access-token-after-refresh",
+    })
+
+    with patch("pipeline.gmail_client.Credentials") as creds_cls, \
+         patch("pipeline.gmail_client.Request") as request_cls:
+        creds_cls.from_authorized_user_info.return_value = fake_creds
+        load_credentials(p)
+
+    # .refresh() was called with a Request() instance
+    assert fake_creds.refresh.call_count == 1
+    # File was re-written with the post-refresh token JSON
+    data = json.loads(p.read_text())
+    assert data["token"] == "new-access-token-after-refresh"
+
+
 # ---------- OAuth flow ----------
 
 def _client_secret_json(tmp_path: Path) -> Path:
@@ -91,6 +127,11 @@ def test_build_authorization_url_returns_url_and_state(tmp_path: Path) -> None:
     args, kwargs = flow_cls.from_client_secrets_file.call_args
     assert kwargs["scopes"] == ["https://www.googleapis.com/auth/gmail.send"]
     assert kwargs["redirect_uri"] == "http://localhost:5051/api/oauth/callback"
+    # The two kwargs that make the OAuth flow actually return a refresh_token.
+    # Dropping either silently breaks token persistence on re-authorization.
+    flow.authorization_url.assert_called_once_with(
+        access_type="offline", prompt="consent"
+    )
 
 
 def test_exchange_code_for_token_persists_refresh_token(tmp_path: Path) -> None:

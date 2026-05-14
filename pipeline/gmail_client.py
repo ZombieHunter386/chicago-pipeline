@@ -8,6 +8,7 @@ Public surface:
   build_authorization_url(client_secrets_path, redirect_uri) -> (url, state)
   exchange_code_for_token(...) -> None      # writes token file
   load_credentials(token_path) -> Credentials
+  save_token(token_path, info)              # write token JSON with 0o600
   is_connected(token_path) -> bool
   send_email(token_path, sender, to, subject, body) -> {id, threadId}
 """
