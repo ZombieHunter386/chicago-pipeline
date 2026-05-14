@@ -241,3 +241,27 @@ If you want to tear it down:
 4. Cloudflare R2 → bucket → "Settings" → "Delete bucket"
 
 Once all four are deleted, you stop being billed.
+
+---
+
+## Refreshing the production DB on R2
+
+The Railway deployment downloads the DB from `DB_DOWNLOAD_URL` at container
+boot. When you need to refresh prod, **always sanitize first** if your local
+DB has outreach data:
+
+```bash
+# 1. Sanitize a copy of the working DB (strips outreach/contacts/waves rows).
+.venv/bin/python scripts/sanitize_db_for_r2.py data/full.alt.db data/full.alt.sanitized.db
+
+# 2. Upload data/full.alt.sanitized.db to the R2 bucket using whatever method
+#    you currently use (rclone, the Cloudflare web UI, etc.). Replace the
+#    object at DB_DOWNLOAD_URL.
+
+# 3. In the Railway dashboard, wipe the persistent volume and trigger a
+#    redeploy so the new DB is downloaded fresh.
+```
+
+If you re-fetched from upstream (`pipeline.fetch_all → cleanup → consolidate
+→ condo_rollup → score`) on a clean DB that never had outreach rows, you can
+skip step 1 — but running the sanitize step on every upload is a safe habit.

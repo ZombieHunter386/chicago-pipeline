@@ -36,3 +36,6 @@ tests/
 
 # Docs
 *.md
+data/gmail_token.json
+data/gmail_oauth_client.json
+.env.local

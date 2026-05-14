@@ -1,0 +1,27 @@
+# Email templates used by the outreach compose modal.
+# Variables (rendered with {{var}} regex substitution):
+#   {{owner_name}}, {{owner_first_name}}, {{address}}, {{ward}}, {{zip}},
+#   {{score}}, {{property_class}}, {{year_built}}, {{building_sf}}, {{lot_size_sf}},
+#   {{my_name}}, {{my_email}}, {{my_phone}}
+# Missing variables render as literal "{{name}}" so you'll see them in preview.
+templates:
+  - name: initial-cold
+    label: "Initial cold inquiry"
+    subject: "Question about {{address}}"
+    body: |
+      Hi {{owner_first_name}},
+
+      I'm reaching out about your property at {{address}}. I work with a small
+      group that buys and renovates multifamily buildings on the South and West
+      Sides, and your building caught our attention.
+
+      No agents, no pressure — we just like to introduce ourselves to local owners
+      directly. If you've ever thought about selling, I'd love to chat.
+
+      Best,
+      {{my_name}}
+      {{my_phone}}
+defaults:
+  my_name: "Hunter"
+  my_email: "hsheyman@gmail.com"
+  my_phone: ""
