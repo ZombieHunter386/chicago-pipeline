@@ -26,6 +26,33 @@
     } catch (_) { return iso; }
   }
 
+  // ---------- Toast utility ----------
+  // Top-right slide-in notifications. Auto-dismiss after `durationMs` or
+  // click to dismiss. Stacks vertically when multiple show at once.
+  function showToast(message, kind, durationMs) {
+    kind = kind || 'info';
+    durationMs = durationMs == null ? 3000 : durationMs;
+    let container = document.getElementById('outreach-toast-container');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'outreach-toast-container';
+      document.body.appendChild(container);
+    }
+    const toast = document.createElement('div');
+    toast.className = 'outreach-toast outreach-toast-' + kind;
+    toast.textContent = message;
+    toast.addEventListener('click', () => toast.remove());
+    container.appendChild(toast);
+    // Trigger entrance on the next frame so the transition runs.
+    requestAnimationFrame(() => toast.classList.add('show'));
+    setTimeout(() => {
+      toast.classList.remove('show');
+      // Remove from DOM after transition; safety timeout in case transitionend
+      // doesn't fire (e.g., element was already detached by click-to-dismiss).
+      setTimeout(() => toast.remove(), 280);
+    }, durationMs);
+  }
+
   async function fetchOutreach(pin) {
     const resp = await fetch(`/api/parcels/${encodeURIComponent(pin)}/outreach`);
     if (!resp.ok) throw new Error(`fetch outreach failed: ${resp.status}`);
@@ -70,6 +97,10 @@
     const contact = data.contact || {};
     const email = contact.email || '';
 
+    const gmailStatus = data.gmail_connected
+      ? '<span class="outreach-gmail-status-connected">✓ Gmail connected</span>'
+      : '<a href="/api/oauth/start" class="outreach-connect-link">Connect Gmail</a>';
+
     el.innerHTML = `
       <h3>Contact</h3>
       <div class="detail-grid" style="grid-template-columns: 1fr;">
@@ -80,7 +111,6 @@
                    class="outreach-input"
                    placeholder="owner@example.com"
                    value="${escapeHtml(email)}" />
-            <span class="outreach-email-status" id="outreach-email-status"></span>
           </div>
         </div>
         <div class="detail-item">
@@ -91,57 +121,42 @@
           <div class="label">Mail address</div>
           <div class="value">${escapeHtml(parcel.mail_address || '—')}</div>
         </div>
-        <div class="detail-item" style="display:flex; gap:8px; align-items:center;">
-          <button type="button" class="btn btn-primary" id="outreach-compose-btn"
-                  ${email ? '' : 'disabled'}
-                  title="${email ? '' : 'Add an email above first'}">
-            Compose email…
-          </button>
-          <span class="outreach-gmail-status" style="font-size:11px; color:#8b949e;">
-            ${data.gmail_connected
-              ? 'Gmail connected'
-              : '<a href="/api/oauth/start">Connect Gmail</a>'}
-          </span>
+        <div class="detail-item">
+          <div class="value outreach-compose-row">
+            <button type="button" class="btn btn-primary" id="outreach-compose-btn"
+                    ${email ? '' : 'disabled'}
+                    title="${email ? '' : 'Add an email above first'}">
+              Compose email…
+            </button>
+            ${gmailStatus}
+          </div>
         </div>
       </div>
     `;
 
-    // Wire the email input — save on blur if changed.
     const input = el.querySelector('#outreach-email-input');
-    const status = el.querySelector('#outreach-email-status');
     let original = email;
     input.addEventListener('blur', async () => {
       const v = input.value.trim();
       if (v === original) return;
       if (v && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) {
-        status.textContent = 'invalid email';
-        status.style.color = '#f85149';
+        showToast('Invalid email', 'error');
         return;
       }
-      status.textContent = 'saving…';
-      status.style.color = '#8b949e';
       try {
         await upsertContact(parcel.pin, { email: v || null });
-        status.textContent = 'saved';
-        status.style.color = '#3fb950';
         original = v;
-        // Re-render the panel to re-enable the Compose button.
+        showToast(v ? 'Email saved' : 'Email cleared', 'success');
         window.dispatchEvent(new CustomEvent('outreach:refresh',
                                               { detail: { pin: parcel.pin } }));
       } catch (e) {
-        status.textContent = 'error';
-        status.style.color = '#f85149';
+        showToast("Couldn't save email", 'error');
       }
     });
 
-    // Compose button → open modal (wired up in Task 6).
     const btn = el.querySelector('#outreach-compose-btn');
     btn.addEventListener('click', () => {
       if (typeof window.__outreachOpenCompose === 'function') {
-        // The contact object the API returned may be stale relative to what's
-        // in the input right now (user typed an email but blur-save hasn't
-        // round-tripped yet). Build a fresh contact view from the live input
-        // value so Compose always opens with the user's intended recipient.
         const liveEmail = input.value.trim();
         const liveContact = liveEmail
           ? Object.assign({}, data.contact || {}, { email: liveEmail })
@@ -150,8 +165,9 @@
       }
     });
 
-    // Enable/disable Compose live as the user types, so the first click after
-    // entering an email doesn't land on a still-disabled button.
+    // Enable Compose live as the user types, so the first click after entering
+    // an email doesn't land on a still-disabled button (the blur-save round
+    // trip is async and was racing the click).
     input.addEventListener('input', () => {
       const hasEmail = !!input.value.trim();
       btn.disabled = !hasEmail;
@@ -167,41 +183,41 @@
     el.className = 'detail-section';
     const rows = data.outreach || [];
     if (rows.length === 0) {
-      el.innerHTML = '<h3>Outreach History</h3><div style="font-size:12px; color:#8b949e;">No outreach yet.</div>';
+      el.innerHTML = '<h3>Outreach History</h3>'
+        + '<div style="font-size:12px; color:#8b949e;">No outreach yet.</div>';
       return el;
     }
     const html = rows.map(r => {
       const replied = r.response_date
-        ? `<span style="color:#3fb950; margin-left:8px;">✓ replied ${escapeHtml(fmtDate(r.response_date))}</span>`
-        : `<button type="button" class="btn btn-sm" data-mark-replied="${escapeHtml(String(r.outreach_id))}" style="margin-left:8px;">Mark replied</button>`;
+        ? `<span class="outreach-item-replied">✓ replied ${escapeHtml(fmtDate(r.response_date))}</span>`
+        : `<button type="button" class="btn btn-sm" data-mark-replied="${escapeHtml(String(r.outreach_id))}">Mark replied</button>`;
       const body = (r.final_body || r.draft_body || '').trim();
       return `
         <div class="outreach-item">
           <div class="outreach-item-head">
-            <strong>${escapeHtml(r.draft_subject || '(no subject)')}</strong>
-            <span style="color:#8b949e; font-size:11px; margin-left:8px;">
-              ${escapeHtml(r.channel || 'email')} · ${escapeHtml(fmtDate(r.sent_date))}
-            </span>
+            <strong class="outreach-item-subject">${escapeHtml(r.draft_subject || '(no subject)')}</strong>
+            <span class="outreach-item-meta">${escapeHtml(r.channel || 'email')} · ${escapeHtml(fmtDate(r.sent_date))}</span>
             ${replied}
           </div>
           <details>
-            <summary style="font-size:11px; color:#8b949e; cursor:pointer;">Show body</summary>
-            <pre style="white-space:pre-wrap; font-size:12px; padding:6px 0; color:#c9d1d9;">${escapeHtml(body)}</pre>
+            <summary>Show body</summary>
+            <pre>${escapeHtml(body)}</pre>
           </details>
         </div>
       `;
     }).join('');
     el.innerHTML = `<h3>Outreach History</h3>${html}`;
-    // Wire mark-replied buttons.
     el.querySelectorAll('[data-mark-replied]').forEach(btn => {
       btn.addEventListener('click', async () => {
         btn.disabled = true; btn.textContent = '…';
         try {
           await markReplied(parseInt(btn.dataset.markReplied, 10));
+          showToast('Marked replied', 'success');
           window.dispatchEvent(new CustomEvent('outreach:refresh',
                                                 { detail: { pin: parcel.pin } }));
         } catch (e) {
           btn.disabled = false; btn.textContent = 'Mark replied';
+          showToast("Couldn't mark replied", 'error');
         }
       });
     });
@@ -218,23 +234,20 @@
     el.innerHTML = `
       <h3>Stage</h3>
       <div class="detail-grid" style="grid-template-columns: 1fr;">
-        <div class="detail-item" style="display:flex; gap:8px; align-items:center;">
-          <select id="outreach-stage-select" class="outreach-input">
+        <div class="detail-item">
+          <select id="outreach-stage-select" class="outreach-input outreach-stage-select">
             ${stages.map(s => `<option value="${s}"${s === cur ? ' selected' : ''}>${s}</option>`).join('')}
           </select>
-          <span id="outreach-stage-status" style="font-size:11px; color:#8b949e;"></span>
         </div>
       </div>
     `;
     const sel = el.querySelector('#outreach-stage-select');
-    const status = el.querySelector('#outreach-stage-status');
     sel.addEventListener('change', async () => {
-      status.textContent = 'saving…'; status.style.color = '#8b949e';
       try {
         await setStage(parcel.pin, sel.value);
-        status.textContent = 'saved'; status.style.color = '#3fb950';
+        showToast('Stage updated to "' + sel.value + '"', 'success');
       } catch (e) {
-        status.textContent = 'error'; status.style.color = '#f85149';
+        showToast("Couldn't update stage", 'error');
       }
     });
     return el;
@@ -327,26 +340,26 @@
           <button type="button" class="btn btn-sm" id="outreach-modal-close">Close</button>
         </div>
         <div class="outreach-modal-body">
-          <div>
-            <label for="cm-template">Template</label><br>
+          <div class="cm-row">
+            <label class="cm-label" for="cm-template">Template</label>
             <select id="cm-template">
               ${templates.map((t, i) => `<option value="${i}">${escapeHtml(t.label || t.name)}</option>`).join('')}
             </select>
           </div>
-          <div>
-            <label for="cm-from">From</label><br>
+          <div class="cm-row">
+            <label class="cm-label" for="cm-from">From</label>
             <input type="text" id="cm-from" value="${escapeHtml(senderAddress || '')}" disabled />
           </div>
-          <div>
-            <label for="cm-to">To</label><br>
+          <div class="cm-row">
+            <label class="cm-label" for="cm-to">To</label>
             <input type="email" id="cm-to" value="${escapeHtml(contact && contact.email || '')}" />
           </div>
-          <div>
-            <label for="cm-subject">Subject</label><br>
+          <div class="cm-row">
+            <label class="cm-label" for="cm-subject">Subject</label>
             <input type="text" id="cm-subject" value="" />
           </div>
           <div class="cm-body-row">
-            <label for="cm-body">Body</label>
+            <label class="cm-label" for="cm-body">Body</label>
             <textarea id="cm-body"></textarea>
           </div>
         </div>
@@ -408,6 +421,7 @@
       try {
         await sendOutreach({ pin: parcel.pin, to, subject, body });
         onClose();
+        showToast('Email sent', 'success');
         window.dispatchEvent(new CustomEvent('outreach:refresh',
                                               { detail: { pin: parcel.pin } }));
       } catch (e) {
@@ -461,12 +475,7 @@
           tplSelect.appendChild(opt);
           tplSelect.value = opt.value;
         }
-        errSpan.textContent = 'template saved';
-        errSpan.style.color = '#3fb950';
-        setTimeout(() => {
-          errSpan.textContent = '';
-          errSpan.style.color = '';
-        }, 2500);
+        showToast('Template saved', 'success');
       } catch (e) {
         errSpan.textContent = e.message || 'save failed';
         errSpan.style.color = '';

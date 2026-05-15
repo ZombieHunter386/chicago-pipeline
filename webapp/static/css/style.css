@@ -266,3 +266,134 @@
   margin-right: auto;
   align-self: center;
 }
+
+/* ===== Outreach polish pass ===== */
+
+/* Toast notifications — top-right, slide-in, click or auto-dismiss. */
+#outreach-toast-container {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 10000;
+  pointer-events: none;
+}
+.outreach-toast {
+  background: #161b22;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  border-left-width: 4px;
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 12px;
+  max-width: 320px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  pointer-events: auto;
+  cursor: pointer;
+  transform: translateX(120%);
+  transition: transform 220ms ease, opacity 220ms ease;
+  opacity: 0;
+}
+.outreach-toast.show { transform: translateX(0); opacity: 1; }
+.outreach-toast-success { border-left-color: #3fb950; }
+.outreach-toast-error { border-left-color: #f85149; }
+.outreach-toast-info { border-left-color: #58a6ff; }
+
+/* Connect Gmail link as a small inline pill-button. */
+.outreach-connect-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  background: #21262d;
+  color: #58a6ff;
+  font-size: 11px;
+  text-decoration: none;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.outreach-connect-link:hover {
+  background: #30363d;
+  border-color: #58a6ff;
+  text-decoration: none;
+}
+.outreach-gmail-status-connected {
+  font-size: 11px;
+  color: #3fb950;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Compose row layout — proper block labels, no <br> tags. */
+.cm-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cm-label {
+  font-size: 11px;
+  color: #8b949e;
+}
+
+/* Stage section — restrain the bare <select> a bit. */
+.outreach-stage-select {
+  min-width: 140px;
+}
+
+/* Outreach history rows — promote the inline styles to real rules. */
+.outreach-item-head {
+  /* existing rule defines display/font/etc.; this section just adds spacing. */
+  gap: 8px;
+  padding-bottom: 4px;
+}
+.outreach-item-subject {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.outreach-item-meta {
+  font-size: 11px;
+  color: #8b949e;
+}
+.outreach-item-replied {
+  font-size: 11px;
+  color: #3fb950;
+}
+.outreach-item details > summary {
+  font-size: 11px;
+  color: #8b949e;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.outreach-item details > summary::-webkit-details-marker { display: none; }
+.outreach-item details > summary::before {
+  content: '▸ ';
+  display: inline-block;
+  transition: transform 120ms ease;
+}
+.outreach-item details[open] > summary::before {
+  content: '▾ ';
+}
+.outreach-item details pre {
+  white-space: pre-wrap;
+  font-size: 12px;
+  padding: 6px 0 0;
+  color: #c9d1d9;
+  margin: 0;
+  font-family: inherit;
+}
+.outreach-item .btn-sm {
+  margin-left: auto;
+}
+
+/* The Compose button row spacing. */
+.outreach-compose-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
