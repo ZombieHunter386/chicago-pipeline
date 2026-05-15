@@ -10,3 +10,6 @@ data/*.log
 .venv/
 venv/
 .DS_Store
+data/gmail_token.json
+data/gmail_oauth_client.json
+.env.local

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "webapp-outreach",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": ["-m", "webapp", "--db", "data/full.alt.db", "--port", "5051", "--outreach"],
+      "port": 5051
+    }
+  ]
+}

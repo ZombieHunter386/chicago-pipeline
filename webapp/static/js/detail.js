@@ -80,8 +80,11 @@
     panel.appendChild(sectionFinancials(p));
     panel.appendChild(sectionDistress(p));
     if (p.bldg_sf_sources) panel.appendChild(sectionSFCompare(p));
-    if (window.FEATURE_OUTREACH) {
-      panel.appendChild(sectionOutreachStub());
+    if (window.FEATURE_OUTREACH && typeof window.__outreachRenderSections === 'function') {
+      // Bump a per-render serial on the panel so async outreach appends
+      // can detect a newer render and bail out.
+      panel.dataset.renderSerial = String(parseInt(panel.dataset.renderSerial || '0', 10) + 1);
+      window.__outreachRenderSections(p, panel);
     }
   }
 
@@ -545,16 +548,6 @@
     note.style.cssText = 'font-size:11px; color:#8b949e; padding:6px 0 0;';
     note.textContent = 'Merge rule: assessor wins when non-null; footprint backstops where assessor is empty.';
     el.querySelector('.detail-grid').after(note);
-    return el;
-  }
-
-  function sectionOutreachStub() {
-    const el = document.createElement('div');
-    el.className = 'detail-section';
-    el.innerHTML = `
-      <h3>Outreach</h3>
-      <div style="font-size:12px; color:#8b949e;">Outreach UI is planned for a later implementation phase.</div>
-    `;
     return el;
   }
 

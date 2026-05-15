@@ -9,3 +9,6 @@ responses==0.25.3
 flask==3.0.3
 gunicorn==23.0.0
 scikit-learn==1.7.2
+google-auth==2.36.0
+google-auth-oauthlib==1.2.1
+google-api-python-client==2.151.0

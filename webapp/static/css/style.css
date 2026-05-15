@@ -151,3 +151,249 @@
   .feedback-stat:last-child { border: none; }
   .feedback-stat .signal { font-size: 12px; color: #c9d1d9; }
   .feedback-stat .rate { font-size: 12px; font-weight: 600; }
+
+/* ===== Outreach (Plan 4) ===== */
+
+.outreach-input {
+  background: #0d1117;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.outreach-input:focus { outline: 1px solid #58a6ff; }
+
+.outreach-email-status {
+  font-size: 11px;
+  margin-left: 8px;
+}
+
+.outreach-item {
+  padding: 8px 0;
+  border-bottom: 1px solid #30363d;
+}
+.outreach-item:last-child { border-bottom: none; }
+.outreach-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: 12px;
+  color: #c9d1d9;
+}
+
+/* Compose modal — added in Task 6 */
+.outreach-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.outreach-modal {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  width: min(640px, 90vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  color: #c9d1d9;
+}
+.outreach-modal-head {
+  padding: 12px 16px;
+  border-bottom: 1px solid #30363d;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.outreach-modal-head h3 { margin: 0; font-size: 14px; }
+.outreach-modal-body {
+  padding: 12px 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.outreach-modal-body label {
+  font-size: 11px;
+  color: #8b949e;
+}
+.outreach-modal-body input,
+.outreach-modal-body select,
+.outreach-modal-body textarea {
+  background: #0d1117;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: inherit;
+}
+.outreach-modal-body textarea {
+  resize: none;
+}
+.outreach-modal-body input,
+.outreach-modal-body select,
+.outreach-modal-body textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+.cm-body-row {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 200px;
+  gap: 4px;
+}
+.cm-body-row textarea {
+  flex: 1;
+  min-height: 200px;
+}
+.outreach-modal-foot {
+  padding: 12px 16px;
+  border-top: 1px solid #30363d;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.outreach-modal-error {
+  color: #f85149;
+  font-size: 12px;
+  margin-right: auto;
+  align-self: center;
+}
+
+/* ===== Outreach polish pass ===== */
+
+/* Toast notifications — top-right, slide-in, click or auto-dismiss. */
+#outreach-toast-container {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 10000;
+  pointer-events: none;
+}
+.outreach-toast {
+  background: #161b22;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  border-left-width: 4px;
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 12px;
+  max-width: 320px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  pointer-events: auto;
+  cursor: pointer;
+  transform: translateX(120%);
+  transition: transform 220ms ease, opacity 220ms ease;
+  opacity: 0;
+}
+.outreach-toast.show { transform: translateX(0); opacity: 1; }
+.outreach-toast-success { border-left-color: #3fb950; }
+.outreach-toast-error { border-left-color: #f85149; }
+.outreach-toast-info { border-left-color: #58a6ff; }
+
+/* Connect Gmail link as a small inline pill-button. */
+.outreach-connect-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  background: #21262d;
+  color: #58a6ff;
+  font-size: 11px;
+  text-decoration: none;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.outreach-connect-link:hover {
+  background: #30363d;
+  border-color: #58a6ff;
+  text-decoration: none;
+}
+.outreach-gmail-status-connected {
+  font-size: 11px;
+  color: #3fb950;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Compose row layout — proper block labels, no <br> tags. */
+.cm-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cm-label {
+  font-size: 11px;
+  color: #8b949e;
+}
+
+/* Stage section — restrain the bare <select> a bit. */
+.outreach-stage-select {
+  min-width: 140px;
+}
+
+/* Outreach history rows — promote the inline styles to real rules. */
+.outreach-item-head {
+  /* existing rule defines display/font/etc.; this section just adds spacing. */
+  gap: 8px;
+  padding-bottom: 4px;
+}
+.outreach-item-subject {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.outreach-item-meta {
+  font-size: 11px;
+  color: #8b949e;
+}
+.outreach-item-replied {
+  font-size: 11px;
+  color: #3fb950;
+}
+.outreach-item details > summary {
+  font-size: 11px;
+  color: #8b949e;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.outreach-item details > summary::-webkit-details-marker { display: none; }
+.outreach-item details > summary::before {
+  content: '▸ ';
+  display: inline-block;
+  transition: transform 120ms ease;
+}
+.outreach-item details[open] > summary::before {
+  content: '▾ ';
+}
+.outreach-item details pre {
+  white-space: pre-wrap;
+  font-size: 12px;
+  padding: 6px 0 0;
+  color: #c9d1d9;
+  margin: 0;
+  font-family: inherit;
+}
+.outreach-item .btn-sm {
+  margin-left: auto;
+}
+
+/* The Compose button row spacing. */
+.outreach-compose-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}

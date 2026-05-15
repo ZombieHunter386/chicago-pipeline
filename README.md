@@ -125,3 +125,46 @@ print('In canonical top-20 but not alternative:', set(canonical) - set(alternati
 print('In alternative top-20 but not canonical:', set(alternative) - set(canonical))
 "
 ```
+
+## Outreach (Plan 4 — local only)
+
+The outreach feature lets you send single-touch cold emails through your own
+Gmail and track outreach + responses per parcel. It is **local-only by
+design** — the code ships to Railway but is gated behind `FEATURE_OUTREACH`,
+which is never set in production. Outreach rows live only in your local DB.
+
+### Enabling locally
+
+```bash
+.venv/bin/python -m webapp --db data/full.alt.db --port 5051 --outreach
+```
+
+### One-time Gmail setup
+
+1. Create a Google Cloud project at <https://console.cloud.google.com/>.
+2. Enable the Gmail API for that project.
+3. Configure the OAuth consent screen as "External" + "Testing" mode, and
+   add your own Gmail address to the test users list.
+4. Create an OAuth 2.0 Client ID — type **Web application**. Add
+   `http://localhost:5051/api/oauth/callback` to the Authorized redirect URIs.
+5. Download the JSON. Save it to `data/gmail_oauth_client.json`.
+6. Copy `.env.example` to `.env` and set `GMAIL_SENDER_ADDRESS` to the
+   Gmail address you'll send from.
+7. Start the webapp with `--outreach`. In any parcel detail panel, click
+   **Connect Gmail**. Approve the consent screen. You'll land back on the
+   review UI. The status indicator next to the Compose button now reads
+   "Gmail connected".
+
+The refresh token is persisted to `data/gmail_token.json` (gitignored). Both
+files are also in `.dockerignore` so they never ship in a container build.
+
+### Editing email templates
+
+Templates live in `config/outreach_templates.yaml`. Variables are written
+`{{var}}` and substituted with the selected parcel's data. Missing
+variables stay literal so you can spot what's not wired up.
+
+### Before re-uploading the DB to R2
+
+See [DEPLOY.md](DEPLOY.md#refreshing-the-production-db-on-r2) — always run
+`scripts/sanitize_db_for_r2.py` to strip outreach/contacts/waves rows.
