@@ -183,11 +183,6 @@
   color: #c9d1d9;
 }
 
-.btn-sm {
-  font-size: 11px;
-  padding: 2px 8px;
-}
-
 /* Compose modal — added in Task 6 */
 .outreach-modal-backdrop {
   position: fixed;
