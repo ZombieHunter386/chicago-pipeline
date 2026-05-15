@@ -304,3 +304,15 @@ def test_save_template_atomic_no_partial_on_dir_failure(tmp_path: Path, monkeypa
     # No leftover .outreach_templates.*.tmp files in the dir
     leftovers = [f for f in p.parent.iterdir() if f.name.startswith(".outreach_templates.")]
     assert leftovers == [], f"temp files left behind: {leftovers}"
+
+
+def test_save_template_indents_sequence_items(tmp_path: Path) -> None:
+    """Sequence items (template entries) should be indented under their
+    parent key — `templates:\\n  - name: ...` not `templates:\\n- name: ...`.
+    PyYAML's default is the latter, which produces ugly diffs every time the
+    UI saves. The custom Dumper's increase_indent override forces the former."""
+    p = tmp_path / "templates.yaml"
+    p.write_text("templates: []\ndefaults: {}\n")
+    save_template(p, name="t1", subject="s", body="b")
+    text = p.read_text()
+    assert "\n  - name: t1" in text, f"expected indented seq, got:\n{text}"

@@ -266,7 +266,12 @@ _YAML_HEADER = (
 class _BlockScalarDumper(yaml.SafeDumper):
     """SafeDumper subclass that writes multi-line strings as literal block
     scalars (`|`) instead of the default quoted style — far more readable
-    when a human opens the YAML."""
+    when a human opens the YAML. Also forces sequence items to indent under
+    their parent key (`templates:\\n  - name: ...`) instead of PyYAML's
+    indent-less default; cleaner diffs and matches conventional style."""
+
+    def increase_indent(self, flow=False, indentless=False):
+        return super().increase_indent(flow, False)
 
 
 def _str_block_scalar_representer(dumper: yaml.Dumper, value: str):
