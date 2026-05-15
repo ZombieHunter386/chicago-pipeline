@@ -130,6 +130,29 @@ def test_upsert_contact_rejects_bad_pin(app_on) -> None:
     assert resp.status_code == 400
 
 
+def test_upsert_contact_rejects_null_pin(app_on) -> None:
+    """JSON null for pin should land as 400, not 500."""
+    client = app_on.test_client()
+    resp = client.post(
+        "/api/contacts/upsert",
+        json={"pin": None, "email": "a@b.com"},
+    )
+    assert resp.status_code == 400
+
+
+def test_send_outreach_rejects_null_pin_and_to(app_on) -> None:
+    """JSON null on pin or `to` should land as 400, not 500."""
+    client = app_on.test_client()
+    resp = client.post("/api/outreach/send", json={
+        "pin": None, "to": "x@y.com", "subject": "s", "body": "b",
+    })
+    assert resp.status_code == 400
+    resp = client.post("/api/outreach/send", json={
+        "pin": "14210010010000", "to": None, "subject": "s", "body": "b",
+    })
+    assert resp.status_code == 400
+
+
 # ---------- GET /api/outreach/templates ----------
 
 def test_get_templates_returns_list(app_on) -> None:

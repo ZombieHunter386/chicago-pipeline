@@ -467,7 +467,7 @@ def register(app: Flask) -> None:
         @app.post("/api/contacts/upsert")
         def api_contacts_upsert():
             data = request.get_json(silent=True) or {}
-            pin = data.get("pin", "")
+            pin = data.get("pin") or ""
             email = data.get("email")
             if not pin.isdigit() or len(pin) != 14:
                 abort(400, "invalid pin")
@@ -491,8 +491,8 @@ def register(app: Flask) -> None:
         @app.post("/api/outreach/send")
         def api_outreach_send():
             data = request.get_json(silent=True) or {}
-            pin = data.get("pin", "")
-            to = data.get("to", "")
+            pin = data.get("pin") or ""
+            to = data.get("to") or ""
             subject = data.get("subject")
             body = data.get("body")
             if not pin.isdigit() or len(pin) != 14:

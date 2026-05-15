@@ -22,6 +22,6 @@ templates:
       {{my_name}}
       {{my_phone}}
 defaults:
-  my_name: "Hunter"
-  my_email: "hsheyman@gmail.com"
+  my_name: "Your Name"
+  my_email: "your-name@example.com"
   my_phone: ""
