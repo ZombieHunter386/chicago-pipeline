@@ -28,6 +28,14 @@ def main() -> None:
     gmail_token = os.environ.get("GMAIL_TOKEN_PATH")
     gmail_sender = os.environ.get("GMAIL_SENDER_ADDRESS")
 
+    if args.outreach:
+        # oauthlib refuses to do OAuth over plain HTTP by default; the local
+        # dev server is http://localhost:5051 — never reachable from outside
+        # this machine. Allow insecure transport only when --outreach is on
+        # (which is itself a local-only flag; the wsgi.py prod entry refuses
+        # to enable outreach even if the env var slips through).
+        os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
+
     app = create_app(
         db_path=args.db, feature_outreach=args.outreach,
         scoring_yaml_path=args.scoring_yaml,
