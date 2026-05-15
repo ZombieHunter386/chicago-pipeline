@@ -8,6 +8,8 @@ from typing import Any
 from flask import Flask, abort, current_app, jsonify, redirect, render_template, request, url_for
 from werkzeug.exceptions import HTTPException
 
+from googleapiclient.errors import HttpError
+
 from pipeline import outreach as outreach_module, gmail_client
 from webapp.filter_schema import build_filter_schema
 from webapp.parcel_query import (
@@ -519,6 +521,10 @@ def register(app: Flask) -> None:
                     )
                 except gmail_client.GmailNotConnectedError as e:
                     abort(503, f"Gmail not connected: {e}")
+                except HttpError as e:
+                    # Quota (429), forbidden sender (403), or upstream 5xx.
+                    # Surface a 503 with the actual reason so the UI can show it.
+                    abort(503, f"Gmail API error: {e}")
 
                 oid = outreach_module.create_outreach_record(
                     conn, pin=pin, contact_id=cid,

@@ -67,11 +67,18 @@ def app_off(outreach_db_path: Path):
 # ---------- feature flag gates the routes entirely ----------
 
 def test_outreach_routes_return_404_when_flag_off(app_off) -> None:
+    """All 8 outreach routes must be unreachable when the feature flag is off.
+    Railway runs with FEATURE_OUTREACH unset, so these endpoints don't exist
+    in prod — this test pins that behavior."""
     client = app_off.test_client()
     assert client.get("/api/parcels/14210010010000/outreach").status_code == 404
+    assert client.get("/api/outreach/templates").status_code == 404
     assert client.post("/api/contacts/upsert").status_code == 404
     assert client.post("/api/outreach/send").status_code == 404
+    assert client.post("/api/outreach/1/mark-replied").status_code == 404
+    assert client.post("/api/parcels/14210010010000/stage").status_code == 404
     assert client.get("/api/oauth/start").status_code == 404
+    assert client.get("/api/oauth/callback").status_code == 404
 
 
 # ---------- GET /api/parcels/<pin>/outreach ----------
@@ -211,6 +218,29 @@ def test_send_outreach_surfaces_gmail_error(app_on) -> None:
         })
     assert resp.status_code == 503
     assert "not connected" in resp.get_data(as_text=True).lower()
+
+
+def test_send_outreach_surfaces_gmail_http_error(app_on) -> None:
+    """Gmail API quota / 5xx / forbidden — surface as 503 with the API reason
+    so the UI can show something actionable instead of a generic 500."""
+    from googleapiclient.errors import HttpError
+    client = app_on.test_client()
+    # Build a minimal HttpError. The googleapiclient constructor expects a
+    # response-like object with .status and a content bytestring.
+    from unittest.mock import MagicMock
+    fake_resp = MagicMock()
+    fake_resp.status = 429
+    fake_resp.reason = "Too Many Requests"
+    err = HttpError(fake_resp, b'{"error":{"message":"quota exceeded"}}')
+
+    with patch("webapp.routes.gmail_client.send_email") as send_mock:
+        send_mock.side_effect = err
+        resp = client.post("/api/outreach/send", json={
+            "pin": "14210010010000", "to": "x@y.com",
+            "subject": "s", "body": "b",
+        })
+    assert resp.status_code == 503
+    assert "gmail api error" in resp.get_data(as_text=True).lower()
 
 
 def test_send_outreach_rejects_missing_fields(app_on) -> None:
