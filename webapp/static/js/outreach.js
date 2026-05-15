@@ -329,14 +329,15 @@
             <label for="cm-subject">Subject</label><br>
             <input type="text" id="cm-subject" value="" />
           </div>
-          <div>
-            <label for="cm-body">Body</label><br>
+          <div class="cm-body-row">
+            <label for="cm-body">Body</label>
             <textarea id="cm-body"></textarea>
           </div>
         </div>
         <div class="outreach-modal-foot">
           <span class="outreach-modal-error" id="cm-error"></span>
           <button type="button" class="btn" id="cm-cancel">Cancel</button>
+          <button type="button" class="btn" id="cm-save-template" title="Save this draft as a template">Save template</button>
           <button type="button" class="btn btn-primary" id="cm-send">Send</button>
         </div>
       </div>
@@ -357,6 +358,12 @@
     }
     applyTemplate(0);
     tplSelect.addEventListener('change', () => applyTemplate(parseInt(tplSelect.value, 10)));
+
+    function currentTemplateName() {
+      const idx = parseInt(tplSelect.value, 10);
+      const t = templates[idx];
+      return t ? t.name : '';
+    }
 
     // Escape closes the modal. Defined first so onClose can remove it.
     function onKey(ev) {
@@ -390,6 +397,65 @@
       } catch (e) {
         errSpan.textContent = e.message || 'send failed';
         sendBtn.disabled = false; sendBtn.textContent = 'Send';
+      }
+    });
+
+    const saveBtn = root.querySelector('#cm-save-template');
+    saveBtn.addEventListener('click', async () => {
+      const defaultName = currentTemplateName() || '';
+      const name = (window.prompt('Save template as (use existing name to overwrite):', defaultName) || '').trim();
+      if (!name) return;
+      const existing = templates.find(t => t.name === name);
+      if (existing && name === defaultName) {
+        if (!window.confirm(`Overwrite template "${name}"?`)) return;
+      } else if (existing) {
+        if (!window.confirm(`"${name}" already exists. Overwrite?`)) return;
+      }
+      const subject = subjectInput.value.trim();
+      const body = bodyInput.value;
+      if (!subject) { errSpan.textContent = 'subject required'; return; }
+      errSpan.textContent = '';
+      saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
+      try {
+        const resp = await fetch('/api/outreach/templates/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, subject, body }),
+        });
+        if (!resp.ok) {
+          const text = await resp.text();
+          throw new Error(text || `HTTP ${resp.status}`);
+        }
+        const result = await resp.json();
+        // Insert or update the local templates list.
+        const idx = templates.findIndex(t => t.name === name);
+        const merged = {
+          name: result.template.name,
+          label: result.template.label || name,
+          subject, body,
+          rendered_subject: subject, rendered_body: body,
+        };
+        if (idx >= 0) {
+          templates[idx] = merged;
+        } else {
+          templates.push(merged);
+          const opt = document.createElement('option');
+          opt.value = String(templates.length - 1);
+          opt.textContent = merged.label;
+          tplSelect.appendChild(opt);
+          tplSelect.value = opt.value;
+        }
+        errSpan.textContent = 'template saved';
+        errSpan.style.color = '#3fb950';
+        setTimeout(() => {
+          errSpan.textContent = '';
+          errSpan.style.color = '';
+        }, 2500);
+      } catch (e) {
+        errSpan.textContent = e.message || 'save failed';
+        errSpan.style.color = '';
+      } finally {
+        saveBtn.disabled = false; saveBtn.textContent = 'Save template';
       }
     });
   }

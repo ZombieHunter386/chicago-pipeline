@@ -15,6 +15,7 @@ from pipeline.outreach import (
     create_outreach_record,
     mark_replied,
     parcel_context,
+    save_template,
 )
 
 
@@ -199,3 +200,107 @@ def test_parcel_context_handles_llc_owner_first_name(db: sqlite3.Connection) -> 
     ).fetchone())
     ctx = parcel_context(parcel, {})
     assert ctx["owner_first_name"] == "there"
+
+
+def test_save_template_updates_existing(tmp_path: Path) -> None:
+    p = tmp_path / "templates.yaml"
+    p.write_text(
+        "templates:\n"
+        "  - name: t1\n"
+        "    label: First\n"
+        "    subject: Old subject\n"
+        "    body: |\n"
+        "      Old body line 1\n"
+        "      Old body line 2\n"
+        "defaults:\n"
+        "  my_name: Hunter\n"
+    )
+    saved = save_template(p, name="t1", subject="New subject", body="New body\nline 2\n")
+    assert saved["subject"] == "New subject"
+    reloaded = load_templates(p)
+    assert reloaded["templates"]["t1"]["subject"] == "New subject"
+    assert reloaded["templates"]["t1"]["body"].rstrip("\n") == "New body\nline 2"
+    # Defaults preserved
+    assert reloaded["defaults"]["my_name"] == "Hunter"
+
+
+def test_save_template_creates_new(tmp_path: Path) -> None:
+    p = tmp_path / "templates.yaml"
+    p.write_text(
+        "templates:\n"
+        "  - name: t1\n"
+        "    label: First\n"
+        "    subject: S\n"
+        "    body: B\n"
+        "defaults:\n"
+        "  my_name: Hunter\n"
+    )
+    saved = save_template(p, name="t2", subject="S2", body="B2", label="Second")
+    assert saved["label"] == "Second"
+    reloaded = load_templates(p)
+    assert set(reloaded["templates"].keys()) == {"t1", "t2"}
+    # Original untouched
+    assert reloaded["templates"]["t1"]["subject"] == "S"
+
+
+def test_save_template_preserves_other_templates(tmp_path: Path) -> None:
+    p = tmp_path / "templates.yaml"
+    p.write_text(
+        "templates:\n"
+        "  - name: t1\n"
+        "    label: First\n"
+        "    subject: S1\n"
+        "    body: B1\n"
+        "  - name: t2\n"
+        "    label: Second\n"
+        "    subject: S2\n"
+        "    body: B2\n"
+        "defaults:\n"
+        "  my_name: Hunter\n"
+    )
+    save_template(p, name="t1", subject="New S1", body="New B1")
+    reloaded = load_templates(p)
+    assert reloaded["templates"]["t1"]["subject"] == "New S1"
+    # t2 still intact
+    assert reloaded["templates"]["t2"]["subject"] == "S2"
+
+
+def test_save_template_writes_multiline_as_block_scalar(tmp_path: Path) -> None:
+    """Sanity check on the YAML output style — multi-line bodies should be
+    written as `|` block scalars, not quoted strings, so the file stays
+    readable when a human opens it."""
+    p = tmp_path / "templates.yaml"
+    p.write_text("templates: []\ndefaults: {}\n")
+    save_template(p, name="t1", subject="s", body="line1\nline2\nline3\n")
+    text = p.read_text()
+    assert "body: |" in text, f"expected block scalar for body, got:\n{text}"
+
+
+def test_save_template_preserves_comment_header(tmp_path: Path) -> None:
+    """The standard comment header should be present after a save (PyYAML
+    strips comments on round-trip; we rebuild it deterministically)."""
+    p = tmp_path / "templates.yaml"
+    p.write_text("templates: []\ndefaults: {}\n")
+    save_template(p, name="t1", subject="s", body="b")
+    text = p.read_text()
+    assert text.startswith("# Email templates used by the outreach compose modal.")
+
+
+def test_save_template_atomic_no_partial_on_dir_failure(tmp_path: Path, monkeypatch) -> None:
+    """If os.replace fails, the source file must be untouched and no temp
+    file should be left behind."""
+    p = tmp_path / "templates.yaml"
+    p.write_text("templates: []\ndefaults: {}\n")
+    original = p.read_text()
+
+    def boom(*args, **kwargs):
+        raise OSError("simulated replace failure")
+    monkeypatch.setattr("pipeline.outreach.os.replace", boom)
+
+    with pytest.raises(OSError):
+        save_template(p, name="t1", subject="s", body="b")
+
+    assert p.read_text() == original
+    # No leftover .outreach_templates.*.tmp files in the dir
+    leftovers = [f for f in p.parent.iterdir() if f.name.startswith(".outreach_templates.")]
+    assert leftovers == [], f"temp files left behind: {leftovers}"

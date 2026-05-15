@@ -11,17 +11,13 @@ templates:
     body: |
       Hi {{owner_first_name}},
 
-      I'm reaching out about your property at {{address}}. I work with a small
-      group that buys and renovates multifamily buildings on the South and West
-      Sides, and your building caught our attention.
+      I'm Hunter. I buy and develop apartment buildings in Lakeview, and I wanted to reach out about {{address}}.
 
-      No agents, no pressure — we just like to introduce ourselves to local owners
-      directly. If you've ever thought about selling, I'd love to chat.
+      I'm not an agent, just a local property owner working directly with other owners. If selling has crossed your mind, let me know. If not, no problem.
 
-      Best,
-      {{my_name}}
+      Hunter
       {{my_phone}}
 defaults:
-  my_name: "Your Name"
-  my_email: "your-name@example.com"
+  my_name: "Hunter"
+  my_email: ""
   my_phone: ""

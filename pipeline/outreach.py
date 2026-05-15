@@ -3,8 +3,10 @@
 Pure functions over a sqlite3.Connection. No Flask, no Google libs.
 """
 from __future__ import annotations
+import os
 import re
 import sqlite3
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -204,3 +206,100 @@ def mark_replied(
         (response_date, response_type, outreach_id),
     )
     conn.commit()
+
+
+def save_template(
+    path: Path,
+    *,
+    name: str,
+    subject: str,
+    body: str,
+    label: str | None = None,
+) -> dict[str, Any]:
+    """Update an existing template by name or create a new one. Atomic write
+    via temp file + os.replace so a partial write can't corrupt the YAML.
+
+    Multi-line bodies are written as literal block scalars (`body: |`) so the
+    file stays readable. The standard comment header at the top of the file
+    is restored on every write (PyYAML strips comments on round-trip).
+
+    Returns the saved template dict.
+    """
+    path = Path(path)
+    raw = yaml.safe_load(path.read_text()) if path.exists() else None
+    raw = raw or {}
+    templates_list = list(raw.get("templates") or [])
+    defaults = raw.get("defaults") or {}
+
+    found = False
+    for tpl in templates_list:
+        if tpl.get("name") == name:
+            tpl["subject"] = subject
+            tpl["body"] = body
+            if label is not None:
+                tpl["label"] = label
+            found = True
+            break
+
+    if not found:
+        templates_list.append({
+            "name": name,
+            "label": label or name,
+            "subject": subject,
+            "body": body,
+        })
+
+    _write_templates_yaml(path, {"templates": templates_list, "defaults": defaults})
+    return next(t for t in templates_list if t.get("name") == name)
+
+
+_YAML_HEADER = (
+    "# Email templates used by the outreach compose modal.\n"
+    "# Variables (rendered with {{var}} regex substitution):\n"
+    "#   {{owner_name}}, {{owner_first_name}}, {{address}}, {{ward}}, {{zip}},\n"
+    "#   {{score}}, {{property_class}}, {{year_built}}, {{building_sf}}, {{lot_size_sf}},\n"
+    "#   {{my_name}}, {{my_email}}, {{my_phone}}\n"
+    "# Missing variables render as literal \"{{name}}\" so you'll see them in preview.\n"
+)
+
+
+class _BlockScalarDumper(yaml.SafeDumper):
+    """SafeDumper subclass that writes multi-line strings as literal block
+    scalars (`|`) instead of the default quoted style — far more readable
+    when a human opens the YAML."""
+
+
+def _str_block_scalar_representer(dumper: yaml.Dumper, value: str):
+    if "\n" in value:
+        return dumper.represent_scalar(
+            "tag:yaml.org,2002:str", value, style="|"
+        )
+    return dumper.represent_scalar("tag:yaml.org,2002:str", value)
+
+
+_BlockScalarDumper.add_representer(str, _str_block_scalar_representer)
+
+
+def _write_templates_yaml(path: Path, data: dict[str, Any]) -> None:
+    """Write the templates YAML atomically. Temp file goes in the same dir
+    so os.replace is atomic on the same filesystem."""
+    yaml_body = yaml.dump(
+        data,
+        Dumper=_BlockScalarDumper,
+        default_flow_style=False,
+        sort_keys=False,
+        allow_unicode=True,
+    )
+    final = _YAML_HEADER + yaml_body
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w", dir=str(path.parent), delete=False,
+        prefix=".outreach_templates.", suffix=".tmp",
+    ) as f:
+        f.write(final)
+        tmp_path = Path(f.name)
+    try:
+        os.replace(tmp_path, path)
+    except OSError:
+        tmp_path.unlink(missing_ok=True)
+        raise

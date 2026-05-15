@@ -464,6 +464,32 @@ def register(app: Flask) -> None:
                 })
             return jsonify({"templates": templates})
 
+        @app.post("/api/outreach/templates/save")
+        def api_outreach_save_template():
+            data = request.get_json(silent=True) or {}
+            name = (data.get("name") or "").strip()
+            subject = data.get("subject")
+            body = data.get("body")
+            label = data.get("label")  # optional
+            if not name:
+                abort(400, "name is required")
+            if not subject:
+                abort(400, "subject is required")
+            if body is None:
+                abort(400, "body is required")
+            # Names limited to a safe set — prevents weirdness in file content
+            # and accidental UI breakage from special characters.
+            if not re.match(r"^[A-Za-z0-9][A-Za-z0-9 _-]{0,63}$", name):
+                abort(400, "invalid name: use letters, numbers, spaces, _ or - (max 64 chars)")
+            try:
+                saved = outreach_module.save_template(
+                    Path(app.config["OUTREACH_TEMPLATES_PATH"]),
+                    name=name, subject=subject, body=body, label=label,
+                )
+            except OSError as e:
+                abort(500, f"failed to save template: {e}")
+            return jsonify({"template": saved})
+
         @app.post("/api/contacts/upsert")
         def api_contacts_upsert():
             data = request.get_json(silent=True) or {}

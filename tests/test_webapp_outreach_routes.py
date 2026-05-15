@@ -73,6 +73,7 @@ def test_outreach_routes_return_404_when_flag_off(app_off) -> None:
     client = app_off.test_client()
     assert client.get("/api/parcels/14210010010000/outreach").status_code == 404
     assert client.get("/api/outreach/templates").status_code == 404
+    assert client.post("/api/outreach/templates/save").status_code == 404
     assert client.post("/api/contacts/upsert").status_code == 404
     assert client.post("/api/outreach/send").status_code == 404
     assert client.post("/api/outreach/1/mark-replied").status_code == 404
@@ -174,6 +175,61 @@ def test_get_templates_includes_rendered_preview_for_pin(app_on) -> None:
     # owner_first_name "John" comes from owner_name "JOHN SMITH"
     assert t["rendered_subject"] == "Hi John"
     assert t["rendered_body"] == "About 123 W Main St"
+
+
+def test_save_template_creates_new(app_on, templates_path: Path) -> None:
+    client = app_on.test_client()
+    resp = client.post(
+        "/api/outreach/templates/save",
+        json={
+            "name": "follow-up",
+            "label": "Follow-up",
+            "subject": "Re: {{address}}",
+            "body": "Quick follow-up.",
+        },
+    )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    # Templates endpoint now lists both
+    resp2 = client.get("/api/outreach/templates")
+    names = [t["name"] for t in resp2.get_json()["templates"]]
+    assert "t1" in names and "follow-up" in names
+
+
+def test_save_template_overwrites_existing(app_on, templates_path: Path) -> None:
+    client = app_on.test_client()
+    client.post("/api/outreach/templates/save", json={
+        "name": "t1", "subject": "Different subject",
+        "body": "Different body",
+    })
+    resp = client.get("/api/outreach/templates")
+    t1 = next(t for t in resp.get_json()["templates"] if t["name"] == "t1")
+    assert t1["subject"] == "Different subject"
+
+
+def test_save_template_rejects_empty_name(app_on) -> None:
+    client = app_on.test_client()
+    resp = client.post("/api/outreach/templates/save", json={
+        "name": "", "subject": "s", "body": "b",
+    })
+    assert resp.status_code == 400
+
+
+def test_save_template_rejects_dangerous_name(app_on) -> None:
+    client = app_on.test_client()
+    # Path traversal-ish or special chars should be refused.
+    for bad in ["../escape", "name/with/slash", "name.with.dot", "ñame"]:
+        resp = client.post("/api/outreach/templates/save", json={
+            "name": bad, "subject": "s", "body": "b",
+        })
+        assert resp.status_code == 400, f"expected 400 for name={bad!r}"
+
+
+def test_save_template_404_when_flag_off(app_off) -> None:
+    client = app_off.test_client()
+    resp = client.post("/api/outreach/templates/save", json={
+        "name": "t1", "subject": "s", "body": "b",
+    })
+    assert resp.status_code == 404
 
 
 # ---------- POST /api/outreach/send ----------
