@@ -358,17 +358,19 @@
     applyTemplate(0);
     tplSelect.addEventListener('change', () => applyTemplate(parseInt(tplSelect.value, 10)));
 
-    function onClose() { closeModal(); }
+    // Escape closes the modal. Defined first so onClose can remove it.
+    function onKey(ev) {
+      if (ev.key === 'Escape') onClose();
+    }
+    function onClose() {
+      document.removeEventListener('keydown', onKey);
+      closeModal();
+    }
     root.querySelector('#outreach-modal-close').addEventListener('click', onClose);
     root.querySelector('#cm-cancel').addEventListener('click', onClose);
     // Click outside dialog to close.
     root.addEventListener('click', (e) => { if (e.target === root) onClose(); });
-    document.addEventListener('keydown', function onKey(ev) {
-      if (ev.key === 'Escape') {
-        document.removeEventListener('keydown', onKey);
-        closeModal();
-      }
-    });
+    document.addEventListener('keydown', onKey);
 
     sendBtn.addEventListener('click', async () => {
       const to = root.querySelector('#cm-to').value.trim();
@@ -382,7 +384,7 @@
       sendBtn.disabled = true; sendBtn.textContent = 'Sending…';
       try {
         await sendOutreach({ pin: parcel.pin, to, subject, body });
-        closeModal();
+        onClose();
         window.dispatchEvent(new CustomEvent('outreach:refresh',
                                               { detail: { pin: parcel.pin } }));
       } catch (e) {
