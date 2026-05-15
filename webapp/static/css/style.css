@@ -151,3 +151,107 @@
   .feedback-stat:last-child { border: none; }
   .feedback-stat .signal { font-size: 12px; color: #c9d1d9; }
   .feedback-stat .rate { font-size: 12px; font-weight: 600; }
+
+/* ===== Outreach (Plan 4) ===== */
+
+.outreach-input {
+  background: #0d1117;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.outreach-input:focus { outline: 1px solid #58a6ff; }
+
+.outreach-email-status {
+  font-size: 11px;
+  margin-left: 8px;
+}
+
+.outreach-item {
+  padding: 8px 0;
+  border-bottom: 1px solid #30363d;
+}
+.outreach-item:last-child { border-bottom: none; }
+.outreach-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: 12px;
+  color: #c9d1d9;
+}
+
+.btn-sm {
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+/* Compose modal — added in Task 6 */
+.outreach-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.outreach-modal {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  width: min(640px, 90vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  color: #c9d1d9;
+}
+.outreach-modal-head {
+  padding: 12px 16px;
+  border-bottom: 1px solid #30363d;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.outreach-modal-head h3 { margin: 0; font-size: 14px; }
+.outreach-modal-body {
+  padding: 12px 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.outreach-modal-body label {
+  font-size: 11px;
+  color: #8b949e;
+}
+.outreach-modal-body input,
+.outreach-modal-body select,
+.outreach-modal-body textarea {
+  background: #0d1117;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: inherit;
+}
+.outreach-modal-body textarea {
+  min-height: 200px;
+  resize: vertical;
+}
+.outreach-modal-foot {
+  padding: 12px 16px;
+  border-top: 1px solid #30363d;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.outreach-modal-error {
+  color: #f85149;
+  font-size: 12px;
+  margin-right: auto;
+  align-self: center;
+}

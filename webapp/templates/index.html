@@ -135,6 +135,9 @@
 <script src="{{ url_for('static', filename='js/list.js') }}"></script>
 <script src="{{ url_for('static', filename='js/map.js') }}"></script>
 <script src="{{ url_for('static', filename='js/detail.js') }}"></script>
+{% if feature_outreach %}
+<script src="{{ url_for('static', filename='js/outreach.js') }}"></script>
+{% endif %}
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>
