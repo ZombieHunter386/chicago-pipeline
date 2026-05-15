@@ -81,6 +81,9 @@
     panel.appendChild(sectionDistress(p));
     if (p.bldg_sf_sources) panel.appendChild(sectionSFCompare(p));
     if (window.FEATURE_OUTREACH && typeof window.__outreachRenderSections === 'function') {
+      // Bump a per-render serial on the panel so async outreach appends
+      // can detect a newer render and bail out.
+      panel.dataset.renderSerial = String(parseInt(panel.dataset.renderSerial || '0', 10) + 1);
       window.__outreachRenderSections(p, panel);
     }
   }

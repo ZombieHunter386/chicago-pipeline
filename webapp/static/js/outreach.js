@@ -157,7 +157,7 @@
     const html = rows.map(r => {
       const replied = r.response_date
         ? `<span style="color:#3fb950; margin-left:8px;">✓ replied ${escapeHtml(fmtDate(r.response_date))}</span>`
-        : `<button class="btn btn-sm" data-mark-replied="${r.outreach_id}" style="margin-left:8px;">Mark replied</button>`;
+        : `<button type="button" class="btn btn-sm" data-mark-replied="${escapeHtml(String(r.outreach_id))}" style="margin-left:8px;">Mark replied</button>`;
       const body = (r.final_body || r.draft_body || '').trim();
       return `
         <div class="outreach-item">
@@ -227,16 +227,21 @@
   // ---------- Public API ----------
 
   async function renderOutreachSections(parcel, panel) {
+    // Snapshot the panel's render serial at call time. If a newer render
+    // bumps it before our fetch returns, we're stale — bail without appending.
+    const serial = panel.dataset.renderSerial;
     let data;
     try {
       data = await fetchOutreach(parcel.pin);
     } catch (_) {
+      if (panel.dataset.renderSerial !== serial) return;
       const err = document.createElement('div');
       err.className = 'detail-section';
       err.innerHTML = '<h3>Outreach</h3><div style="font-size:12px; color:#f85149;">Couldn\'t load outreach data.</div>';
       panel.appendChild(err);
       return;
     }
+    if (panel.dataset.renderSerial !== serial) return;
     panel.appendChild(renderStageSection(parcel));
     panel.appendChild(renderContactSection(parcel, data));
     panel.appendChild(renderHistorySection(parcel, data));
