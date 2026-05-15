@@ -138,8 +138,24 @@
     const btn = el.querySelector('#outreach-compose-btn');
     btn.addEventListener('click', () => {
       if (typeof window.__outreachOpenCompose === 'function') {
-        window.__outreachOpenCompose(parcel, data.contact, data.sender_address);
+        // The contact object the API returned may be stale relative to what's
+        // in the input right now (user typed an email but blur-save hasn't
+        // round-tripped yet). Build a fresh contact view from the live input
+        // value so Compose always opens with the user's intended recipient.
+        const liveEmail = input.value.trim();
+        const liveContact = liveEmail
+          ? Object.assign({}, data.contact || {}, { email: liveEmail })
+          : data.contact;
+        window.__outreachOpenCompose(parcel, liveContact, data.sender_address);
       }
+    });
+
+    // Enable/disable Compose live as the user types, so the first click after
+    // entering an email doesn't land on a still-disabled button.
+    input.addEventListener('input', () => {
+      const hasEmail = !!input.value.trim();
+      btn.disabled = !hasEmail;
+      btn.title = hasEmail ? '' : 'Add an email above first';
     });
     return el;
   }
