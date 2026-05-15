@@ -259,4 +259,139 @@
 
   // Expose to detail.js
   window.__outreachRenderSections = renderOutreachSections;
+
+  // ---------- Compose modal ----------
+
+  async function fetchTemplates(pin) {
+    const resp = await fetch(`/api/outreach/templates?pin=${encodeURIComponent(pin)}`);
+    if (!resp.ok) throw new Error(`fetch templates failed: ${resp.status}`);
+    return resp.json();
+  }
+
+  async function sendOutreach(payload) {
+    const resp = await fetch('/api/outreach/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+  }
+
+  function closeModal() {
+    const m = document.getElementById('outreach-modal-root');
+    if (m) m.remove();
+  }
+
+  async function openComposeModal(parcel, contact, senderAddress) {
+    // Fetch templates with rendered preview for this pin.
+    let tplResp;
+    try { tplResp = await fetchTemplates(parcel.pin); }
+    catch (_) {
+      alert("Couldn't load outreach templates.");
+      return;
+    }
+    const templates = tplResp.templates || [];
+    if (templates.length === 0) {
+      alert('No outreach templates configured. Edit config/outreach_templates.yaml.');
+      return;
+    }
+
+    // Build modal DOM.
+    const root = document.createElement('div');
+    root.id = 'outreach-modal-root';
+    root.className = 'outreach-modal-backdrop';
+    root.innerHTML = `
+      <div class="outreach-modal" role="dialog" aria-modal="true" aria-label="Compose email">
+        <div class="outreach-modal-head">
+          <h3>Compose email — ${escapeHtml(parcel.address || parcel.pin)}</h3>
+          <button type="button" class="btn btn-sm" id="outreach-modal-close">Close</button>
+        </div>
+        <div class="outreach-modal-body">
+          <div>
+            <label for="cm-template">Template</label><br>
+            <select id="cm-template">
+              ${templates.map((t, i) => `<option value="${i}">${escapeHtml(t.label || t.name)}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label for="cm-from">From</label><br>
+            <input type="text" id="cm-from" value="${escapeHtml(senderAddress || '')}" disabled />
+          </div>
+          <div>
+            <label for="cm-to">To</label><br>
+            <input type="email" id="cm-to" value="${escapeHtml(contact && contact.email || '')}" />
+          </div>
+          <div>
+            <label for="cm-subject">Subject</label><br>
+            <input type="text" id="cm-subject" value="" />
+          </div>
+          <div>
+            <label for="cm-body">Body</label><br>
+            <textarea id="cm-body"></textarea>
+          </div>
+        </div>
+        <div class="outreach-modal-foot">
+          <span class="outreach-modal-error" id="cm-error"></span>
+          <button type="button" class="btn" id="cm-cancel">Cancel</button>
+          <button type="button" class="btn btn-primary" id="cm-send">Send</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(root);
+
+    const subjectInput = root.querySelector('#cm-subject');
+    const bodyInput = root.querySelector('#cm-body');
+    const tplSelect = root.querySelector('#cm-template');
+    const errSpan = root.querySelector('#cm-error');
+    const sendBtn = root.querySelector('#cm-send');
+
+    function applyTemplate(idx) {
+      const t = templates[idx];
+      if (!t) return;
+      subjectInput.value = t.rendered_subject || t.subject || '';
+      bodyInput.value = t.rendered_body || t.body || '';
+    }
+    applyTemplate(0);
+    tplSelect.addEventListener('change', () => applyTemplate(parseInt(tplSelect.value, 10)));
+
+    function onClose() { closeModal(); }
+    root.querySelector('#outreach-modal-close').addEventListener('click', onClose);
+    root.querySelector('#cm-cancel').addEventListener('click', onClose);
+    // Click outside dialog to close.
+    root.addEventListener('click', (e) => { if (e.target === root) onClose(); });
+    document.addEventListener('keydown', function onKey(ev) {
+      if (ev.key === 'Escape') {
+        document.removeEventListener('keydown', onKey);
+        closeModal();
+      }
+    });
+
+    sendBtn.addEventListener('click', async () => {
+      const to = root.querySelector('#cm-to').value.trim();
+      const subject = subjectInput.value.trim();
+      const body = bodyInput.value;
+      errSpan.textContent = '';
+      if (!to || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) {
+        errSpan.textContent = 'invalid recipient email'; return;
+      }
+      if (!subject) { errSpan.textContent = 'subject required'; return; }
+      sendBtn.disabled = true; sendBtn.textContent = 'Sending…';
+      try {
+        await sendOutreach({ pin: parcel.pin, to, subject, body });
+        closeModal();
+        window.dispatchEvent(new CustomEvent('outreach:refresh',
+                                              { detail: { pin: parcel.pin } }));
+      } catch (e) {
+        errSpan.textContent = e.message || 'send failed';
+        sendBtn.disabled = false; sendBtn.textContent = 'Send';
+      }
+    });
+  }
+
+  // Wire the compose button trigger from renderContactSection.
+  window.__outreachOpenCompose = openComposeModal;
 })();
