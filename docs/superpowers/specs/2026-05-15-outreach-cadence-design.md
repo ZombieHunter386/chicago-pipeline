@@ -20,7 +20,7 @@ The Flask app computes Due Today on every page load — no background jobs, no s
 
 Each parcel has its own cadence clock. The schedule for parcel P is anchored at the date you first emailed P (touch 1). Subsequent target dates are `touch_1.sent_date + day_offset` per touch. Missed touches show as overdue but don't shift future ones.
 
-**Hard rule: cadence requires email at start.** If a parcel has no `contact.email`, it can't enter cadence — `next_due_touches_for_parcel` returns `[]`. To do mail-only outreach on an emailless parcel, the user handles that as a standalone manual touch outside the cadence (no schedule, no anchor). This is a deliberate simplification away from the older 2026-04-13 spec's "mail is the guaranteed fallback channel" language, because supporting cadence-without-touch-1 forces a messy anchor model and the volume doesn't justify it.
+**Rule: cadence requires some touch_1 row to anchor.** If a parcel has no `outreach` row with `touch_number = 1`, `next_due_touches_for_parcel` returns `[]`. The touch_1 row is typically created by sending the cold email (channel=`email`, sent_date=now). For an emailless parcel that should still get mail-only outreach, the user can record a touch 1 with `channel=skipped` via the log-manual-touch endpoint — that anchors the cadence at "today" without sending anything. Subsequent touches schedule normally from that anchor; the engine silently skips email touches (1, 2, 5, 7) because `requires=email` isn't satisfied, but mail touches (4, 6) surface as expected. Phone touch (3) surfaces if a phone exists. This is the spec's escape hatch for mail-only campaigns and supersedes the older 2026-04-13 spec's "mail is the guaranteed fallback" language.
 
 ### 3. No `waves` concept in v1
 
@@ -446,6 +446,7 @@ Target: ~30 new tests, full suite ~305+ passing after the plan ships.
 | `cadence_version` snapshotting | Mid-flight YAML edits are user-initiated and rare | Defer; document the gotcha |
 | Bounce auto-detection | Manual flag covers it | If bounce rate becomes a real problem |
 | Multi-user auth on Railway | Phase B | After Phase A validation |
+| Re-starting cadence after `responded → outreach` revert | `validate_next_due_touch` refuses duplicate touch 1 | Manually delete the prior outreach rows for that parcel via SQL if you need to fully restart |
 
 ---
 

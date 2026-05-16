@@ -1,6 +1,8 @@
-# Outreach Cadence (Phase A) — Implementation Plan
+# Outreach Cadence (Phase A only) — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+> **Scope marker:** This plan covers **Phase A only** — everything runs on Hunter's local Mac. Phase B (Railway migration, multi-user auth, always-on cron) is **deliberately not in scope**. A high-level Phase B preview appears at the bottom of this plan; it is not part of this implementation.
 
 **Goal:** Build the 7-touch cadence engine + Due Today UI + daily digest + manual-touch logging on top of the shipped single-touch outreach, all local-only (no Railway migration). Aligns with the spec at `docs/superpowers/specs/2026-05-15-outreach-cadence-design.md` (Phase A scope).
 
@@ -40,9 +42,9 @@
 - T6/T7/T8 (all routes) are needed before T9-T11 (frontend)
 - T12 (digest CLI) is needed before T13 (launchd)
 
-Order: T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9 → T10 → T11 → T12 → T13 → T14.
+Order: T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9 → T10 → T11 → T12 → T13 → T14 → T15 → T16.
 
-Each task ends with a single commit. After T14 the branch is ready to merge.
+Each task ends with a single commit. After T16 the branch is ready to merge.
 
 ---
 
@@ -1758,6 +1760,30 @@ def test_send_outreach_rejects_out_of_order_touch(app_on):
     assert resp.status_code == 400
 
 
+def test_send_persists_gmail_message_id_to_dedicated_column(app_on, outreach_db_path):
+    """The send route writes the Gmail message id to its dedicated column,
+    NOT polluting the notes field. Replaces the prior 'gmail_message_id=X'
+    string-in-notes hack."""
+    import sqlite3
+    with patch("webapp.routes.gmail_client.send_email") as send_mock:
+        send_mock.return_value = {"id": "msg-abc-123", "threadId": "thr-1"}
+        resp = app_on.test_client().post("/api/outreach/send", json={
+            "pin": "14210010010000", "to": "x@y.com",
+            "subject": "s", "body": "b",
+        })
+    assert resp.status_code == 200
+    oid = resp.get_json()["outreach_id"]
+    conn = sqlite3.connect(outreach_db_path)
+    row = conn.execute(
+        "SELECT gmail_message_id, notes FROM outreach WHERE outreach_id = ?",
+        (oid,),
+    ).fetchone()
+    conn.close()
+    assert row[0] == "msg-abc-123"
+    # notes must NOT be polluted with the old "gmail_message_id=X" format
+    assert row[1] is None or "gmail_message_id=" not in row[1]
+
+
 def test_send_outreach_defaults_touch_number_to_1(app_on, outreach_db_path):
     """Backward-compat: omitting touch_number sends touch 1."""
     with patch("webapp.routes.gmail_client.send_email") as send_mock:
@@ -2039,7 +2065,7 @@ In `webapp/routes.py`, find `api_parcel_outreach`. After the existing query/cont
 .venv/bin/python -m pytest -q
 ```
 
-Expected: 5 new outreach route tests pass; full suite 313 + 5 = 318.
+Expected: 6 new outreach route tests pass (5 + the gmail_message_id persistence test); full suite 313 + 6 = 319.
 
 - [ ] **Step 6: Commit**
 
@@ -2668,9 +2694,25 @@ Find the templates fetch + template selection logic. The current code lets the u
     try { cadenceCfg = await getCadenceConfig(); } catch (_) {}
     const cadenceTouch = cadenceCfg && cadenceCfg.sequence
       ? cadenceCfg.sequence.find(t => t.touch === touchNumber) : null;
-    const defaultIdx = cadenceTouch
-      ? Math.max(0, templates.findIndex(t => t.name === cadenceTouch.template))
-      : 0;
+    let defaultIdx = 0;
+    if (cadenceTouch) {
+      const idx = templates.findIndex(t => t.name === cadenceTouch.template);
+      if (idx < 0) {
+        // Cadence references a template that doesn't exist in
+        // outreach_templates.yaml. Falling back to the first template,
+        // but surface the gap so the user knows something's wrong.
+        console.warn(
+          'Cadence references template', cadenceTouch.template,
+          'which is not in outreach_templates.yaml. Falling back to first.'
+        );
+        showToast(
+          `Template "${cadenceTouch.template}" missing — using fallback`,
+          'error',
+        );
+      } else {
+        defaultIdx = idx;
+      }
+    }
     tplSelect.value = String(defaultIdx);
     applyTemplate(defaultIdx);
 ```
@@ -3228,19 +3270,12 @@ git commit -m "feat(cadence): daily Due Today digest CLI (pipeline.due_digest)"
 
 ---
 
-## Task 13: Launchd installer + backup script + observability endpoint + README
+## Task 13: Launchd installer + plist + README digest section
 
 **Files:**
 - Create: `chicago-pipeline/scripts/install_due_digest_launchd.sh`
 - Create: `chicago-pipeline/scripts/com.chicagopipeline.duedigest.plist.template`
-- Create: `chicago-pipeline/scripts/backup_outreach.sh`
-- Modify: `chicago-pipeline/webapp/routes.py` (add `/api/health/digest`)
-- Modify: `chicago-pipeline/webapp/app.py` (add `DUE_DIGEST_LAST_RUN_PATH` config key)
-- Modify: `chicago-pipeline/webapp/static/js/outreach.js` (surface last-run timestamp)
-- Modify: `chicago-pipeline/webapp/static/css/style.css` (style the warning)
-- Modify: `chicago-pipeline/tests/test_webapp_cadence_routes.py` (test the new endpoint)
-- Modify: `chicago-pipeline/.gitignore` (ignore the new sentinel + log files)
-- Modify: `chicago-pipeline/README.md`
+- Modify: `chicago-pipeline/README.md` (add "Outreach cadence" section + "Daily digest" sub-section)
 
 - [ ] **Step 1: Create the launchd plist template**
 
@@ -3340,7 +3375,88 @@ cd /Users/hunterheyman/Claude/chicago-pipeline
 chmod +x scripts/install_due_digest_launchd.sh
 ```
 
-- [ ] **Step 3: Create the backup script**
+- [ ] **Step 3: Update README.md with the cadence section (digest portion)**
+
+In `README.md`, append at the very end:
+
+```markdown
+
+## Outreach cadence (7-touch sequence)
+
+The cadence engine surfaces what's due today across all parcels in `outreach` stage. See [docs/superpowers/specs/2026-05-15-outreach-cadence-design.md](docs/superpowers/specs/2026-05-15-outreach-cadence-design.md) for the design.
+
+### Phases
+
+- **Phase A (current):** local cadence, local launchd digest. Mac-on assumed.
+- **Phase B (separate, not in this plan):** Railway deploy with multi-user auth + always-on cron. See the plan's "Phase B preview" appendix for scope.
+
+### Daily digest (Phase A)
+
+A launchd job emails you a Due Today summary at 9am local time daily, skipping the email if nothing is due.
+
+**One-time install:**
+
+\`\`\`bash
+.venv/bin/python -m pytest -q   # confirm green
+./scripts/install_due_digest_launchd.sh   # reads .env for GMAIL_SENDER_ADDRESS
+\`\`\`
+
+**Test the digest manually:**
+
+\`\`\`bash
+.venv/bin/python -m pipeline.due_digest --dry-run
+\`\`\`
+
+**Uninstall:**
+
+\`\`\`bash
+launchctl unload ~/Library/LaunchAgents/com.chicagopipeline.duedigest.plist
+rm ~/Library/LaunchAgents/com.chicagopipeline.duedigest.plist
+\`\`\`
+
+### Editing cadence rules
+
+Edit `config/outreach_cadence.yaml` directly. Changes take effect on the next page load — no restart. Mid-flight edits will shift in-progress parcels (no `cadence_version` snapshotting in v1; document changes in the YAML's comment header).
+
+### Editing touch templates
+
+The compose modal's Save template button writes back to `config/outreach_templates.yaml`. Six new templates ship as drafts; the cold-intro (touch 1) is the previously-shipped version. Edit content directly in the file or via the UI.
+
+### Skipping a touch
+
+If a touch's `requires` field isn't satisfied (e.g., no phone for touch 3), the cadence engine silently skips it — it never surfaces in Due Today. If you have the contact info but choose not to use a channel (e.g., have the phone but don't want to call), open the touch via Compose and click **Skip touch** in the modal. The touch is logged with channel = `skipped` and the cadence advances to the next available touch.
+```
+
+(IMPORTANT — in the actual file, use real backticks not `\`\`\`` — the escaping above is so this prompt's outer fence doesn't break. The destination README.md must have real `\`\`\`bash` blocks.)
+
+- [ ] **Step 4: Run pytest sanity check + smoke**
+
+```bash
+.venv/bin/python -m pytest -q
+.venv/bin/python -m pipeline.due_digest --help | head -10
+```
+
+Expected: 325 passed (no test changes in this task); help text prints without error.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add scripts/install_due_digest_launchd.sh \
+        scripts/com.chicagopipeline.duedigest.plist.template \
+        README.md
+git commit -m "feat(cadence): launchd installer + README cadence section"
+```
+
+---
+
+## Task 14: Backup script + .gitignore + README backup section
+
+**Files:**
+- Create: `chicago-pipeline/scripts/backup_outreach.sh`
+- Modify: `chicago-pipeline/.gitignore` (ignore backup files)
+- Modify: `chicago-pipeline/README.md` (add "Backups" sub-section)
+
+- [ ] **Step 1: Create the backup script**
 
 Create `chicago-pipeline/scripts/backup_outreach.sh`:
 
@@ -3362,13 +3478,14 @@ if [ ! -f "$SRC" ]; then
 fi
 
 # Dump only the outreach-related tables. SQL text file is human-readable
-# and small (~few KB at 10-20/wk volume). To restore: sqlite3 <new.db>
+# and small (~few KB at 10-20/wk volume). sqlite3 CLI only accepts one
+# SQL arg, so we feed commands via stdin. To restore: sqlite3 <new.db>
 # < $DEST after init_db creates the schema.
-sqlite3 "$SRC" \
-    ".dump outreach" \
-    ".dump contacts" \
-    ".dump waves" \
-    > "$DEST"
+sqlite3 "$SRC" <<'EOF' > "$DEST"
+.dump outreach
+.dump contacts
+.dump waves
+EOF
 
 # Keep only the last 30 daily backups — older than that gets pruned.
 find "$PROJECT_DIR/data" -name 'outreach_backup_*.sql' -type f \
@@ -3395,14 +3512,75 @@ Expected: at least one `.sql` backup file in `data/`.
 
 Optionally wire to launchd as a sibling job (8:55am daily, 5 min before the digest). Create `scripts/com.chicagopipeline.backup.plist.template` if you want automated daily backups, or just run the script manually before any risky operation.
 
-- [ ] **Step 4: Add the observability endpoint `/api/health/digest`**
+- [ ] **Step 2: Add backup files to .gitignore**
+
+Append to `.gitignore`:
+
+```
+# Outreach backup dumps
+data/outreach_backup_*.sql
+```
+
+Confirm with `git check-ignore -v data/outreach_backup_test.sql` → should match the new rule.
+
+- [ ] **Step 3: Append the "Backups" sub-section to README.md**
+
+In `README.md`, immediately after the "Skipping a touch" section added in T13, append:
+
+```markdown
+
+### Backups
+
+Outreach state lives in your local SQLite file (`data/full.alt.db`). Run a backup before any risky operation:
+
+\`\`\`bash
+./scripts/backup_outreach.sh
+\`\`\`
+
+This dumps just the `outreach`, `contacts`, and `waves` tables to a timestamped `.sql` file under `data/`. The last 30 daily backups are kept; older ones are pruned.
+```
+
+(Use real backticks in the file.)
+
+- [ ] **Step 4: Run pytest + smoke**
+
+```bash
+.venv/bin/python -m pytest -q
+./scripts/backup_outreach.sh
+```
+
+Expected: 325 passed (no test changes); backup writes a `.sql` file.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add scripts/backup_outreach.sh .gitignore README.md
+git commit -m "feat(cadence): backup_outreach.sh + .gitignore + README"
+```
+
+---
+
+## Task 15: Observability endpoint + UI badge + tests
+
+**Files:**
+- Modify: `chicago-pipeline/webapp/app.py` (add `DUE_DIGEST_LAST_RUN_PATH` config key)
+- Modify: `chicago-pipeline/webapp/__main__.py` (read env var, pass through)
+- Modify: `chicago-pipeline/webapp/routes.py` (add `/api/health/digest`)
+- Modify: `chicago-pipeline/webapp/static/js/outreach.js` (surface last-run timestamp)
+- Modify: `chicago-pipeline/webapp/static/css/style.css` (style the warning)
+- Modify: `chicago-pipeline/tests/test_webapp_cadence_routes.py` (test the new endpoint)
+- Modify: `chicago-pipeline/.gitignore` (ignore sentinel + log)
+- Modify: `chicago-pipeline/README.md` (add "Digest observability" sub-section)
+
+- [ ] **Step 1: Add the observability endpoint `/api/health/digest`**
 
 Open `webapp/app.py` and add a new config key alongside the existing outreach paths. After `app.config["GMAIL_TOKEN_PATH"] = ...`, add:
 
 ```python
-    app.config["DUE_DIGEST_LAST_RUN_PATH"] = due_digest_last_run_path or Path(
-        "data/due_digest_last_run.txt"
-    )
+    # Default is None — the health endpoint treats that as "no observability
+    # configured" rather than reading a real path. Tests and prod each set
+    # their own path explicitly. Avoids relative-path test pollution.
+    app.config["DUE_DIGEST_LAST_RUN_PATH"] = due_digest_last_run_path
 ```
 
 Add the param to `create_app`'s signature alongside the other Path params:
@@ -3411,6 +3589,25 @@ Add the param to `create_app`'s signature alongside the other Path params:
     due_digest_last_run_path: Path | None = None,
 ```
 
+Also update `webapp/__main__.py` to read the sentinel path from env (alongside the existing GMAIL_* env reads):
+
+```python
+    digest_last_run = os.environ.get("DUE_DIGEST_LAST_RUN_PATH",
+                                     "data/due_digest_last_run.txt")
+```
+
+and pass it through to `create_app`:
+
+```python
+    app = create_app(
+        ...,
+        due_digest_last_run_path=Path(digest_last_run),
+        ...,
+    )
+```
+
+This way the production webapp gets the file path from env (with a sensible default), while tests can pass `None` and get a clean isolated state.
+
 Open `webapp/routes.py` and add a new route inside the existing `if app.config["FEATURE_OUTREACH"]:` block (next to `/api/cadence/config`):
 
 ```python
@@ -3418,9 +3615,15 @@ Open `webapp/routes.py` and add a new route inside the existing `if app.config["
         def api_health_digest():
             """Returns the last-known-good timestamp of the daily digest
             cron + a stale flag. Used by the UI to warn when the digest
-            hasn't fired (Mac was off, cron is broken, etc.)."""
+            hasn't fired (Mac was off, cron is broken, etc.). When the
+            config has no sentinel path set (e.g., in tests with no
+            override), reports as not-configured rather than crashing."""
             from datetime import datetime, timedelta, timezone
-            p = Path(app.config["DUE_DIGEST_LAST_RUN_PATH"])
+            raw = app.config.get("DUE_DIGEST_LAST_RUN_PATH")
+            if raw is None:
+                return jsonify({"last_run": None, "stale": True,
+                                "reason": "not configured"})
+            p = Path(raw)
             if not p.exists():
                 return jsonify({"last_run": None, "stale": True,
                                 "reason": "no sentinel file yet"})
@@ -3492,7 +3695,7 @@ Run the tests:
 
 Expected: 12 prior + 3 new = 15 cadence-route tests pass.
 
-- [ ] **Step 5: Surface the last-run timestamp in the UI**
+- [ ] **Step 2: Surface the last-run timestamp in the UI**
 
 In `webapp/static/js/outreach.js`, near `renderDueToday`, add a function that fetches digest health and prepends a warning to the Due Today bar when stale:
 
@@ -3546,110 +3749,53 @@ Add the CSS to `webapp/static/css/style.css`:
 }
 ```
 
-- [ ] **Step 6: Add the new artifacts to `.gitignore`**
+- [ ] **Step 3: Add the new artifacts to `.gitignore`**
 
 Append to `.gitignore`:
 
 ```
-# Cadence runtime artifacts — local-only
+# Cadence digest runtime artifacts — local-only
 data/due_digest.log
 data/due_digest_last_run.txt
-data/outreach_backup_*.sql
 ```
 
-- [ ] **Step 7: Update README.md with the cadence section**
+(`data/outreach_backup_*.sql` was added in T14.)
+
+- [ ] **Step 4: Append the "Digest observability" sub-section to README.md**
 
 In `README.md`, append at the very end:
 
 ```markdown
 
-## Outreach cadence (7-touch sequence)
-
-The cadence engine surfaces what's due today across all parcels in `outreach` stage. See [docs/superpowers/specs/2026-05-15-outreach-cadence-design.md](docs/superpowers/specs/2026-05-15-outreach-cadence-design.md) for the design.
-
-### Phases
-
-- **Phase A (current):** local cadence, local launchd digest. Mac-on assumed.
-- **Phase B (future):** Railway deploy with multi-user auth + always-on cron.
-
-### Daily digest (Phase A)
-
-A launchd job emails you a Due Today summary at 9am local time daily, skipping the email if nothing is due.
-
-**One-time install:**
-
-```bash
-.venv/bin/python -m pytest -q   # confirm green
-./scripts/install_due_digest_launchd.sh   # reads .env for GMAIL_SENDER_ADDRESS
-```
-
-**Test the digest manually:**
-
-```bash
-.venv/bin/python -m pipeline.due_digest --dry-run
-```
-
-**Uninstall:**
-
-```bash
-launchctl unload ~/Library/LaunchAgents/com.chicagopipeline.duedigest.plist
-rm ~/Library/LaunchAgents/com.chicagopipeline.duedigest.plist
-```
-
-### Editing cadence rules
-
-Edit `config/outreach_cadence.yaml` directly. Changes take effect on the next page load — no restart. Mid-flight edits will shift in-progress parcels (no `cadence_version` snapshotting in v1; document changes in the YAML's comment header).
-
-### Editing touch templates
-
-The compose modal's Save template button writes back to `config/outreach_templates.yaml`. Six new templates ship as drafts; the cold-intro (touch 1) is the previously-shipped version. Edit content directly in the file or via the UI.
-
-### Skipping a touch
-
-If a touch's `requires` field isn't satisfied (e.g., no phone for touch 3), the cadence engine silently skips it — it never surfaces in Due Today. If you have the contact info but choose not to use a channel (e.g., have the phone but don't want to call), open the touch via Compose and click **Skip touch** in the modal. The touch is logged with channel = `skipped` and the cadence advances to the next available touch.
-
-### Backups
-
-Outreach state lives in your local SQLite file (`data/full.alt.db`). Run a backup before any risky operation:
-
-```bash
-./scripts/backup_outreach.sh
-```
-
-This dumps just the `outreach`, `contacts`, and `waves` tables to a timestamped `.sql` file under `data/`. The last 30 daily backups are kept; older ones are pruned.
-
 ### Digest observability
 
-The daily digest writes a sentinel file (`data/due_digest_last_run.txt`) on every successful run. The UI surfaces a "⚠ Digest stale" badge in the Due Today bar when the sentinel is older than 25 hours, or absent. Check `data/due_digest.log` for the underlying error.
+The daily digest writes a sentinel file (`data/due_digest_last_run.txt`) on every run (including empty-day runs). The UI surfaces a "⚠ Digest stale" badge in the Due Today bar when the sentinel is older than 25 hours, or absent. Check `data/due_digest.log` for the underlying error.
 ```
 
-- [ ] **Step 8: Run pytest + sanity checks**
+(Use real backticks in the file.)
+
+- [ ] **Step 5: Run pytest + sanity check**
 
 ```bash
 .venv/bin/python -m pytest -q
-.venv/bin/python -m pipeline.due_digest --help | head -10
-./scripts/backup_outreach.sh
 ```
 
-Expected: 328 passed (325 + 3 new health-digest tests); help text prints without error; backup script writes a `.sql` file.
+Expected: 328 passed (325 + 3 new health-digest tests).
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add scripts/install_due_digest_launchd.sh \
-        scripts/com.chicagopipeline.duedigest.plist.template \
-        scripts/backup_outreach.sh \
-        webapp/app.py webapp/routes.py \
+git add webapp/app.py webapp/__main__.py webapp/routes.py \
         webapp/static/js/outreach.js webapp/static/css/style.css \
         tests/test_webapp_cadence_routes.py \
         .gitignore \
         README.md
-git commit -m "feat(cadence): launchd, backup script, /api/health/digest, README"
+git commit -m "feat(cadence): /api/health/digest + UI stale-digest badge"
 ```
 
 ---
 
-## Task 14: Browser smoke verification + final commit
+## Task 16: Browser smoke verification + final commit
 
 **Files:**
 - No code changes — verification only.
@@ -3727,11 +3873,7 @@ pkill -f "python -m webapp" 2>/dev/null || true
 
 Expected: 328 passed, 0 failed.
 
-- [ ] **Step 6: Branch summary commit (optional — empty or doc-only)**
-
-If anything came up during smoke testing that needed a small fix, commit it now with a clear message. Otherwise skip.
-
-- [ ] **Step 7: Push the branch**
+- [ ] **Step 6: Push the branch**
 
 ```bash
 git push -u origin outreach-cadence
@@ -3743,14 +3885,51 @@ Branch is ready to merge.
 
 ## Self-review
 
-After all 14 tasks land, run this self-check:
+After all 16 tasks land, run this self-check:
 
-1. **Spec coverage:** The spec at `docs/superpowers/specs/2026-05-15-outreach-cadence-design.md` lists every requirement. For each section (Architecture, Cadence YAML, Templates, Cadence engine, Schema, API surface, UI, Digest, Sequence rules), point at a task. All accounted for in T1-T14.
+1. **Spec coverage:** The spec at `docs/superpowers/specs/2026-05-15-outreach-cadence-design.md` lists every requirement. For each section (Architecture, Cadence YAML, Templates, Cadence engine, Schema, API surface, UI, Digest, Sequence rules), point at a task. All accounted for in T1-T16.
 
 2. **Placeholder scan:** Read the plan top to bottom. Any "TBD", vague "handle edge cases", incomplete code blocks, missing test bodies? Fix inline.
 
 3. **Type consistency:** `cadence_config` dict shape is identical across `load_cadence_config` return, `next_due_touches_for_parcel` arg, `is_end_of_sequence` arg, and `all_due_touches` arg. `outreach_rows` shape (list of dicts with `touch_number`, `sent_date`) is the same everywhere. `validate_next_due_touch` is the only new outreach.py export.
 
-4. **Test count math:** 276 start → +3 (T2) → +13 (T3) → +5 (T4) → +4 (T5) → +4 (T6) → +8 (T7) → +5 (T8) → +7 (T12) → +3 (T13) = 328 final.
+4. **Test count math:** 276 start → +3 (T2) → +13 (T3) → +5 (T4) → +4 (T5) → +4 (T6) → +8 (T7) → +6 (T8, includes gmail_message_id persistence) → +7 (T12) → +3 (T15) = 329 final.
 
 If any check fails, add the missing task or fix the existing one inline; no need for a second review pass.
+
+---
+
+## Phase B preview (NOT IN SCOPE OF THIS PLAN)
+
+**Phase A — this plan — ships the cadence engine + Due Today + digest + manual-touch logging locally. Hunter will run Phase A only.**
+
+This appendix exists so that when Phase B is eventually picked up, we don't re-brainstorm from scratch. It is **not a task list** — it's a scope sketch. Phase B will get its own design spec + implementation plan when Hunter decides to migrate.
+
+### Phase B scope (when triggered)
+
+- **Multi-user auth.** Replace single-user basic-auth with a `WEBAPP_USERS` JSON env map. Per-user identity via `g.user`. Existing routes stay open to all authed users; outreach routes + UI gated by `g.user in OUTREACH_USERS`.
+- **Password hashing.** Use `werkzeug.security.generate_password_hash` / `check_password_hash` (bcrypt). Document the rotation process in `DEPLOY.md`.
+- **Outreach state on Railway persistent volume.** Either (a) a second SQLite file dedicated to outreach (`outreach.db`) mounted on the volume, or (b) merged into the existing R2-downloaded DB with a sanitize step before re-upload. (a) is cleaner; (b) is fewer moving parts.
+- **Gmail OAuth on Railway.** Add `https://<app>.up.railway.app/api/oauth/callback` to the Google Cloud OAuth client's authorized redirects. Redo the OAuth dance from the deployed app to write a fresh refresh token to the persistent volume. Drop the `OAUTHLIB_INSECURE_TRANSPORT=1` workaround in prod.
+- **Replace local launchd with Railway cron.** Cron schedule fires `python -m pipeline.due_digest` daily. Update `DUE_DIGEST_LAST_RUN_PATH` to point at the volume.
+- **Un-build the wsgi.py "no outreach in deployed contexts" guard.** Replaced by per-user gating.
+- **Update OAuth callback redirect URI** in code (it's read from `url_for` so this is automatic; just need the Google Cloud-side registration).
+- **Security review.** Captured as a separate todo. Specifically: rate-limit basic-auth, document Gmail token rotation runbook, audit every outreach route for `g.user in OUTREACH_USERS`, verify 404-not-403 leak prevention, review CSRF posture given multi-user.
+- **Data migration.** One-time: dump local outreach/contacts/waves, upload to Railway volume, init Railway DB schema.
+- **UI surface for "which user am I logged in as".** Top-bar badge or similar; David sees no outreach UI; Hunter sees full cadence.
+
+### What Phase B does *not* change
+
+- The cadence engine, YAML config, templates, "Due Today" surfacing logic — all carry forward unchanged
+- The 6 new touch templates and the 7-touch sequence
+- The compose modal, sequence timeline, manual-touch UI
+- The skip-touch escape hatch
+- The backup script (still relevant for occasional disaster-recovery snapshots)
+
+### Estimated effort
+
+~1.5-2 days of focused work for Phase B once Phase A has validated the cadence design. Best done after 2-3 weeks of real Phase A use so the cadence shape is locked.
+
+### When to start Phase B
+
+After Phase A has been running for ≥2 weeks of real outreach (10-20 parcels/week) and Hunter is confident the cadence design is right. Until then, the migration cost compounds with cadence design churn.
