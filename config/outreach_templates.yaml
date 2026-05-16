@@ -50,7 +50,7 @@ templates:
 
       I'm writing instead of emailing because I figured an actual letter has a better chance of getting your attention than another email in your inbox.
 
-      My name is Hunter Heyman. I live and work in Lakeview, where I buy and develop apartment buildings. I've reached out about {{address}} a couple times by phone and email already.
+      My name is Hunter Heyman. I live and work in Lakeview, where I buy and develop apartment buildings. I've reached out about {{address}} a couple times by email and phone already.
 
       I'm not a broker or a wholesaler. I'm a local owner who would rather have direct conversations with other owners than fight for deals on the open market. When a building like yours comes up, I want to be on the short list of people the seller calls first.
 
@@ -95,7 +95,7 @@ templates:
     body: |
       Hi {{owner_first_name}},
 
-      This is the last note from me on {{address}} for now. I wanted to circle back one more time in case timing has shifted since I first reached out.
+      This is the last note from me on {{address}} for now. I wanted to follow up one more time in case timing has shifted since I first reached out.
 
       If selling ever becomes something you're open to, I'd be glad to talk. Otherwise I'll stop knocking and let you get back to running your building.
 
