@@ -191,6 +191,24 @@ def test_target_dates_anchored_to_touch_1_not_shifted_by_late_touches(cfg):
     assert out[0]["target_date"] == "2026-05-08"
 
 
+def test_outreach_rows_with_null_touch_number_are_ignored(cfg):
+    """Pre-cadence outreach rows have touch_number=None. They must not
+    interfere with the anchor lookup or the by_touch dict."""
+    rows = [
+        {"touch_number": None, "sent_date": "2026-05-01T09:00:00Z"},  # pre-cadence row
+        {"touch_number": 1, "sent_date": "2026-05-08T09:00:00Z"},
+    ]
+    out = next_due_touches_for_parcel(
+        cadence_config=cfg, outreach_rows=rows,
+        contact={"email": "a@b.com"},
+        parcel_mail_address="100 Main St",
+        today=date(2026, 5, 12),
+    )
+    # Touch 2 should be due (anchor = touch_1 = 5-08, day 3 = 5-11, today 5-12)
+    assert len(out) == 1
+    assert out[0]["touch"] == 2
+
+
 # ---------- is_end_of_sequence ----------
 
 def test_end_of_sequence_false_when_touches_incomplete(cfg):
@@ -224,3 +242,16 @@ def test_end_of_sequence_respects_grace_days(cfg):
     assert is_end_of_sequence(
         cadence_config=cfg, outreach_rows=rows, today=date(2026, 5, 15),
     ) is False  # only 5 days since last, need 30
+
+
+def test_end_of_sequence_false_when_last_touch_has_no_sent_date(cfg):
+    """A touch_number row without sent_date can't anchor end-of-sequence —
+    happens transiently for manual touches mid-write."""
+    rows = [
+        {"touch_number": 1, "sent_date": "2026-04-15T09:00:00Z"},
+        {"touch_number": 2, "sent_date": "2026-04-18T09:00:00Z"},
+        {"touch_number": 3, "sent_date": None},
+    ]
+    assert is_end_of_sequence(
+        cadence_config=cfg, outreach_rows=rows, today=date(2026, 5, 15),
+    ) is False

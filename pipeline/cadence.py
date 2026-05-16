@@ -1,9 +1,9 @@
 """Cadence engine — pure functions over outreach state.
 
-Three pure functions (no DB) for the cadence rules, plus an orchestrator
-(in this same file, added in Task 4) that hits the DB. The pure functions
-are trivially unit-testable; the orchestrator is the only function that
-needs a DB fixture.
+Three public pure functions (load_cadence_config, next_due_touches_for_parcel,
+is_end_of_sequence) plus two private helpers. No DB, no Flask. The orchestrator
+(`all_due_touches`) is added in Task 4 — it's the only function in this file
+that touches SQLite. The pure functions are unit-testable without fixtures.
 """
 from __future__ import annotations
 from datetime import date, timedelta
@@ -157,5 +157,5 @@ def is_end_of_sequence(
     if not last_row.get("sent_date"):
         return False
     last_date = _parse_iso_date(last_row["sent_date"])
-    grace = cadence_config.get("end_of_sequence_grace_days", 0)
+    grace = cadence_config["end_of_sequence_grace_days"]
     return (today - last_date).days >= grace
