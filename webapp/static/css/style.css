@@ -409,6 +409,7 @@
   font-size: 12px;
   color: #c9d1d9;
 }
+.due-today-bar[hidden] { display: none; }
 .due-today-label {
   font-weight: 600;
   letter-spacing: 0.08em;
