@@ -520,3 +520,19 @@
   border-radius: 3px;
   margin-left: 6px;
 }
+
+/* ===== Manual touch modal ===== */
+.manual-template-text {
+  min-height: 180px;
+  background: #0d1117;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+}
+#manual-notes {
+  min-height: 80px;
+}

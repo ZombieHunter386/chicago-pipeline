@@ -155,13 +155,25 @@
     });
 
     const btn = el.querySelector('#outreach-compose-btn');
-    btn.addEventListener('click', () => {
-      if (typeof window.__outreachOpenCompose === 'function') {
-        const liveEmail = input.value.trim();
-        const liveContact = liveEmail
-          ? Object.assign({}, data.contact || {}, { email: liveEmail })
-          : data.contact;
-        window.__outreachOpenCompose(parcel, liveContact, data.sender_address);
+    btn.addEventListener('click', async () => {
+      const liveEmail = input.value.trim();
+      const liveContact = liveEmail
+        ? Object.assign({}, data.contact || {}, { email: liveEmail })
+        : data.contact;
+      const nextDue = data.sequence && data.sequence.next_due;
+      const channel = nextDue ? nextDue.channel : 'email';
+      const touchNum = nextDue ? nextDue.touch : 1;
+
+      if (channel === 'email') {
+        if (typeof window.__outreachOpenCompose === 'function') {
+          window.__outreachOpenCompose(
+            parcel, liveContact, data.sender_address, touchNum,
+          );
+        }
+      } else if (channel === 'phone') {
+        await openPhoneModal(parcel, liveContact, touchNum);
+      } else if (channel === 'mail') {
+        await openMailModal(parcel, touchNum);
       }
     });
 
@@ -536,7 +548,8 @@
     if (m) m.remove();
   }
 
-  async function openComposeModal(parcel, contact, senderAddress) {
+  async function openComposeModal(parcel, contact, senderAddress, touchNumber) {
+    touchNumber = touchNumber || 1;
     // Fetch templates with rendered preview for this pin.
     let tplResp;
     try { tplResp = await fetchTemplates(parcel.pin); }
@@ -606,7 +619,32 @@
       subjectInput.value = t.rendered_subject || t.subject || '';
       bodyInput.value = t.rendered_body || t.body || '';
     }
-    applyTemplate(0);
+    // Default to the cadence template for this touch if it's in the list.
+    let cadenceCfg = null;
+    try { cadenceCfg = await getCadenceConfig(); } catch (_) {}
+    const cadenceTouch = cadenceCfg && cadenceCfg.sequence
+      ? cadenceCfg.sequence.find(t => t.touch === touchNumber) : null;
+    let defaultIdx = 0;
+    if (cadenceTouch) {
+      const idx = templates.findIndex(t => t.name === cadenceTouch.template);
+      if (idx < 0) {
+        // Cadence references a template that doesn't exist in
+        // outreach_templates.yaml. Falling back to the first template,
+        // but surface the gap so the user knows something's wrong.
+        console.warn(
+          'Cadence references template', cadenceTouch.template,
+          'which is not in outreach_templates.yaml. Falling back to first.'
+        );
+        showToast(
+          `Template "${cadenceTouch.template}" missing — using fallback`,
+          'error',
+        );
+      } else {
+        defaultIdx = idx;
+      }
+    }
+    tplSelect.value = String(defaultIdx);
+    applyTemplate(defaultIdx);
     tplSelect.addEventListener('change', () => applyTemplate(parseInt(tplSelect.value, 10)));
 
     function currentTemplateName() {
@@ -640,7 +678,10 @@
       if (!subject) { errSpan.textContent = 'subject required'; return; }
       sendBtn.disabled = true; sendBtn.textContent = 'Sending…';
       try {
-        await sendOutreach({ pin: parcel.pin, to, subject, body });
+        await sendOutreach({
+          pin: parcel.pin, to, subject, body,
+          touch_number: touchNumber,
+        });
         onClose();
         showToast('Email sent', 'success');
         window.dispatchEvent(new CustomEvent('outreach:refresh',
@@ -704,6 +745,135 @@
         saveBtn.disabled = false; saveBtn.textContent = 'Save template';
       }
     });
+  }
+
+  async function fetchTemplateRendered(pin, templateName) {
+    const resp = await fetch(`/api/outreach/templates?pin=${encodeURIComponent(pin)}`);
+    if (!resp.ok) throw new Error('fetch templates failed');
+    const data = await resp.json();
+    return (data.templates || []).find(t => t.name === templateName);
+  }
+
+  async function logManualTouch(payload) {
+    const resp = await fetch('/api/outreach/log-manual-touch', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+  }
+
+  function buildManualModal(title, bodyText, channel, parcel, touchNumber, scriptLabel) {
+    const root = document.createElement('div');
+    root.id = 'outreach-modal-root';
+    root.className = 'outreach-modal-backdrop';
+    root.innerHTML = `
+      <div class="outreach-modal" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">
+        <div class="outreach-modal-head">
+          <h3>${escapeHtml(title)}</h3>
+          <button type="button" class="btn btn-sm" id="manual-modal-close">Close</button>
+        </div>
+        <div class="outreach-modal-body">
+          <div class="cm-row">
+            <label class="cm-label">${escapeHtml(scriptLabel)}</label>
+            <textarea readonly class="manual-template-text">${escapeHtml(bodyText)}</textarea>
+          </div>
+          <div class="cm-row">
+            <label class="cm-label" for="manual-notes">Notes (optional)</label>
+            <textarea id="manual-notes" placeholder="What happened on this touch?"></textarea>
+          </div>
+        </div>
+        <div class="outreach-modal-foot">
+          <span class="outreach-modal-error" id="manual-error"></span>
+          <button type="button" class="btn" id="manual-copy-btn">Copy to clipboard</button>
+          <button type="button" class="btn" id="manual-skip-btn" title="Mark this touch as skipped, no action taken">Skip touch</button>
+          <button type="button" class="btn btn-primary" id="manual-complete-btn">Mark complete</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(root);
+
+    function onKey(ev) { if (ev.key === 'Escape') onClose(); }
+    function onClose() {
+      document.removeEventListener('keydown', onKey);
+      root.remove();
+    }
+    document.addEventListener('keydown', onKey);
+    root.querySelector('#manual-modal-close').addEventListener('click', onClose);
+    root.addEventListener('click', e => { if (e.target === root) onClose(); });
+
+    root.querySelector('#manual-copy-btn').addEventListener('click', () => {
+      navigator.clipboard.writeText(bodyText).then(
+        () => showToast('Copied to clipboard', 'success'),
+        () => showToast("Couldn't copy", 'error'),
+      );
+    });
+
+    const completeBtn = root.querySelector('#manual-complete-btn');
+    const skipBtn = root.querySelector('#manual-skip-btn');
+    const errSpan = root.querySelector('#manual-error');
+
+    async function submit(actualChannel, successLabel) {
+      const notes = root.querySelector('#manual-notes').value;
+      errSpan.textContent = '';
+      completeBtn.disabled = true; skipBtn.disabled = true;
+      try {
+        await logManualTouch({
+          pin: parcel.pin, touch_number: touchNumber,
+          channel: actualChannel, notes,
+        });
+        onClose();
+        showToast(successLabel, 'success');
+        window.dispatchEvent(new CustomEvent('outreach:refresh',
+                                              { detail: { pin: parcel.pin } }));
+      } catch (e) {
+        errSpan.textContent = e.message || 'save failed';
+        completeBtn.disabled = false; skipBtn.disabled = false;
+      }
+    }
+
+    completeBtn.addEventListener('click',
+      () => submit(channel, `Touch ${touchNumber} logged`));
+    skipBtn.addEventListener('click',
+      () => submit('skipped', `Touch ${touchNumber} skipped`));
+  }
+
+  async function openPhoneModal(parcel, contact, touchNumber) {
+    const cadenceCfg = await getCadenceConfig();
+    const touch = cadenceCfg.sequence.find(t => t.touch === touchNumber);
+    if (!touch) { showToast('No cadence config for that touch', 'error'); return; }
+    let tpl;
+    try { tpl = await fetchTemplateRendered(parcel.pin, touch.template); }
+    catch (_) { showToast("Couldn't load phone template", 'error'); return; }
+    const body = (tpl && (tpl.rendered_body || tpl.body)) || '';
+    const phone = (contact && contact.phone) || 'no phone on file';
+    buildManualModal(
+      `Phone call — touch ${touchNumber} of ${cadenceCfg.sequence.length} · ${phone}`,
+      body,
+      'phone', parcel, touchNumber,
+      'Script (conversational, not verbatim)',
+    );
+  }
+
+  async function openMailModal(parcel, touchNumber) {
+    const cadenceCfg = await getCadenceConfig();
+    const touch = cadenceCfg.sequence.find(t => t.touch === touchNumber);
+    if (!touch) { showToast('No cadence config for that touch', 'error'); return; }
+    let tpl;
+    try { tpl = await fetchTemplateRendered(parcel.pin, touch.template); }
+    catch (_) { showToast("Couldn't load mail template", 'error'); return; }
+    const body = (tpl && (tpl.rendered_body || tpl.body)) || '';
+    const channelLabel = touchNumber === 6 ? 'Postcard' : 'Letter';
+    buildManualModal(
+      `${channelLabel} — touch ${touchNumber} of ${cadenceCfg.sequence.length}`,
+      body,
+      'mail', parcel, touchNumber,
+      `${channelLabel} body (copy + print + mail manually for now)`,
+    );
   }
 
   // Wire the compose button trigger from renderContactSection.
