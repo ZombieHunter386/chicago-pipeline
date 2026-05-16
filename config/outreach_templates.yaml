@@ -17,6 +17,92 @@ templates:
 
       Hunter
       {{my_phone}}
+  - name: email-followup-3day
+    label: Day 3 — short follow-up
+    subject: "Re: Question about {{address}}"
+    body: |
+      Hi {{owner_first_name}},
+
+      Wanted to make sure my note from earlier this week didn't get lost in your inbox.
+
+      The reason I reached out about {{address}}: I focus on buildings like yours in Lakeview, and I'd rather work with the owner directly than wait until something hits the market. If you've thought about selling, even casually, I'd be glad to talk through what that might look like.
+
+      Hunter
+      {{my_phone}}
+  - name: phone-script
+    label: Day 7 — phone script
+    subject: ""
+    body: |
+      Hi, is this {{owner_first_name}}?
+
+      This is Hunter Heyman. I emailed you a couple of times over the last week about {{address}}.
+
+      I buy and develop apartment buildings here in Lakeview. Wanted to introduce myself directly in case my notes got buried in your inbox.
+
+      I'm not asking for anything today, just wanted to put a face on the name. If selling ever comes up for you, I'd love to be on the short list of people you talk to. If it doesn't, no worries.
+
+      How does that sound?
+  - name: letter-day-14
+    label: Day 14 — letter
+    subject: ""
+    body: |
+      Hi {{owner_first_name}},
+
+      I'm writing instead of emailing because I figured an actual letter has a better chance of getting your attention than another email in your inbox.
+
+      My name is Hunter Heyman. I live and work in Lakeview, where I buy and develop apartment buildings. I've reached out about {{address}} a couple times by phone and email already.
+
+      I'm not a broker or a wholesaler. I'm a local owner who would rather have direct conversations with other owners than fight for deals on the open market. When a building like yours comes up, I want to be on the short list of people the seller calls first.
+
+      If you've ever thought about selling, I'd be glad to walk through what that conversation might look like, what I'd offer, what timeline would work for you. There's no obligation in any of it.
+
+      If selling isn't on the table, I understand. You can keep this letter or toss it. If anything changes in the next year or two, my number is at the bottom.
+
+      Best,
+      Hunter
+      {{my_phone}}
+  - name: email-new-angle-19
+    label: Day 19 — market angle
+    subject: Lakeview market — quick thought on {{address}}
+    body: |
+      Hi {{owner_first_name}},
+
+      I've been thinking about your building at {{address}} since my last note.
+
+      A few things I've noticed in Lakeview this year: rents on smaller buildings are holding up better than people expected, but operating costs are climbing fast, especially insurance and property tax. The owners I talk to who are quietly considering selling tend to come back to those numbers more than anything else.
+
+      I'm not assuming any of this applies to you. Just thought it was worth sharing where my head is at, in case it matches where yours is.
+
+      Same offer as before: if selling has been on your mind, I'd be glad to talk. If not, you won't hear from me much longer.
+
+      Hunter
+      {{my_phone}}
+  - name: postcard-day-24
+    label: Day 24 — postcard
+    subject: ""
+    body: |
+      Hi {{owner_first_name}},
+
+      Quick note since the rest of my outreach has been emails and a letter: I'm still here, still interested in {{address}} if you ever want to talk about selling.
+
+      No pressure. If a conversation ever makes sense, my number is below.
+
+      Hunter
+      {{my_phone}}
+  - name: email-warm-close-30
+    label: Day 30 — warm close
+    subject: Last note from me — {{address}}
+    body: |
+      Hi {{owner_first_name}},
+
+      This is the last note from me on {{address}} for now. I wanted to circle back one more time in case timing has shifted since I first reached out.
+
+      If selling ever becomes something you're open to, I'd be glad to talk. Otherwise I'll stop knocking and let you get back to running your building.
+
+      Either way, thanks for the time.
+
+      Hunter
+      {{my_phone}}
 defaults:
   my_name: Hunter
   my_email: ''
