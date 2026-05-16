@@ -289,6 +289,111 @@
   // Expose to detail.js
   window.__outreachRenderSections = renderOutreachSections;
 
+  // ---------- Due Today banner ----------
+
+  async function fetchDue() {
+    const resp = await fetch('/api/outreach/due');
+    if (!resp.ok) throw new Error(`fetch due failed: ${resp.status}`);
+    return resp.json();
+  }
+
+  function channelEmoji(channel) {
+    return {email: '✉', phone: '☎', mail: '✉', end_of_sequence: '✓'}[channel] || '';
+  }
+
+  function channelLabel(channel, count) {
+    const noun = {
+      email: count === 1 ? 'email' : 'emails',
+      phone: count === 1 ? 'phone call' : 'phone calls',
+      mail:  count === 1 ? 'letter' : 'letters',
+      end_of_sequence: count === 1 ? 'ready to retire' : 'ready to retire',
+    }[channel] || channel;
+    return `${count} ${noun}`;
+  }
+
+  async function renderDueToday() {
+    const bar = document.getElementById('due-today-bar');
+    if (!bar) return;
+    let data;
+    try { data = await fetchDue(); } catch (_) { return; }
+    const groups = data.groups || [];
+    if (groups.length === 0) {
+      bar.hidden = true;
+      bar.innerHTML = '<span class="due-today-label">DUE TODAY</span>'
+        + '<span id="due-today-chips" class="due-today-chips"></span>';
+      return;
+    }
+    bar.hidden = false;
+    const chipsEl = bar.querySelector('#due-today-chips');
+    chipsEl.innerHTML = '';
+    groups.forEach(g => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'due-today-chip due-today-chip-' + g.channel;
+      chip.dataset.channel = g.channel;
+      chip.textContent = `${channelEmoji(g.channel)} ${channelLabel(g.channel, g.count)}`;
+      chip.addEventListener('click', () => toggleChipDropdown(chip, g));
+      chipsEl.appendChild(chip);
+    });
+  }
+
+  function toggleChipDropdown(chip, group) {
+    // Close any existing dropdown
+    const existing = document.getElementById('due-today-dropdown');
+    if (existing) {
+      existing.remove();
+      if (existing.dataset.forChannel === group.channel) return; // re-click = close
+    }
+    const dropdown = document.createElement('div');
+    dropdown.id = 'due-today-dropdown';
+    dropdown.className = 'due-today-dropdown';
+    dropdown.dataset.forChannel = group.channel;
+    dropdown.innerHTML = group.items.map(it => {
+      const overdue = it.days_overdue > 0
+        ? `<span class="due-today-overdue">+${it.days_overdue}d</span>` : '';
+      const subline = group.channel === 'end_of_sequence'
+        ? `Sequence complete · ${it.days_since_last}d since last touch`
+        : `Touch ${it.touch} · ${it.target_date}`;
+      return `
+        <button type="button" class="due-today-row" data-pin="${escapeHtml(it.pin)}">
+          <div class="due-today-row-main">
+            <strong>${escapeHtml(it.address || it.pin)}</strong>
+            <span class="due-today-row-owner">${escapeHtml(it.owner_first_name || '')}</span>
+          </div>
+          <div class="due-today-row-sub">${escapeHtml(subline)} ${overdue}</div>
+        </button>
+      `;
+    }).join('');
+    dropdown.querySelectorAll('[data-pin]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const pin = btn.dataset.pin;
+        dropdown.remove();
+        window.dispatchEvent(new CustomEvent('parcelselect', { detail: { pin } }));
+      });
+    });
+    // Position below the chip
+    const rect = chip.getBoundingClientRect();
+    dropdown.style.position = 'fixed';
+    dropdown.style.top = (rect.bottom + 4) + 'px';
+    dropdown.style.left = rect.left + 'px';
+    document.body.appendChild(dropdown);
+    // Click-outside to close
+    setTimeout(() => {
+      document.addEventListener('click', function onDoc(e) {
+        if (!dropdown.contains(e.target) && e.target !== chip) {
+          dropdown.remove();
+          document.removeEventListener('click', onDoc);
+        }
+      });
+    }, 0);
+  }
+
+  // Render on page load + whenever an outreach refresh fires
+  window.addEventListener('DOMContentLoaded', () => { renderDueToday(); });
+  window.addEventListener('outreach:refresh', () => { renderDueToday(); });
+
+  window.__outreachRenderDueToday = renderDueToday;
+
   // ---------- Compose modal ----------
 
   async function fetchTemplates(pin) {

@@ -14,7 +14,14 @@
   <div class="meta" id="top-bar-meta" aria-live="polite">Score v N/A · loading… · Top 20 shown</div>
 </div>
 
-<div class="main">
+{% if feature_outreach %}
+<div id="due-today-bar" class="due-today-bar" hidden>
+  <span class="due-today-label">DUE TODAY</span>
+  <span id="due-today-chips" class="due-today-chips"></span>
+</div>
+{% endif %}
+
+<div class="{% if feature_outreach %}main has-due-bar{% else %}main{% endif %}">
 
   <!-- LEFT: Ranked List -->
   <aside class="left-panel" aria-label="Ranked parcels list">
