@@ -168,3 +168,48 @@ variables stay literal so you can spot what's not wired up.
 
 See [DEPLOY.md](DEPLOY.md#refreshing-the-production-db-on-r2) — always run
 `scripts/sanitize_db_for_r2.py` to strip outreach/contacts/waves rows.
+
+## Outreach cadence (7-touch sequence)
+
+The cadence engine surfaces what's due today across all parcels in `outreach` stage. See [docs/superpowers/specs/2026-05-15-outreach-cadence-design.md](docs/superpowers/specs/2026-05-15-outreach-cadence-design.md) for the design.
+
+### Phases
+
+- **Phase A (current):** local cadence, local launchd digest. Mac-on assumed.
+- **Phase B (separate, not in this plan):** Railway deploy with multi-user auth + always-on cron. See the plan's "Phase B preview" appendix for scope.
+
+### Daily digest (Phase A)
+
+A launchd job emails you a Due Today summary at 9am local time daily, skipping the email if nothing is due.
+
+**One-time install:**
+
+```bash
+.venv/bin/python -m pytest -q   # confirm green
+./scripts/install_due_digest_launchd.sh   # reads .env for GMAIL_SENDER_ADDRESS
+```
+
+**Test the digest manually:**
+
+```bash
+.venv/bin/python -m pipeline.due_digest --dry-run
+```
+
+**Uninstall:**
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.chicagopipeline.duedigest.plist
+rm ~/Library/LaunchAgents/com.chicagopipeline.duedigest.plist
+```
+
+### Editing cadence rules
+
+Edit `config/outreach_cadence.yaml` directly. Changes take effect on the next page load — no restart. Mid-flight edits will shift in-progress parcels (no `cadence_version` snapshotting in v1; document changes in the YAML's comment header).
+
+### Editing touch templates
+
+The compose modal's Save template button writes back to `config/outreach_templates.yaml`. Six new templates ship as drafts; the cold-intro (touch 1) is the previously-shipped version. Edit content directly in the file or via the UI.
+
+### Skipping a touch
+
+If a touch's `requires` field isn't satisfied (e.g., no phone for touch 3), the cadence engine silently skips it — it never surfaces in Due Today. If you have the contact info but choose not to use a channel (e.g., have the phone but don't want to call), open the touch via Compose and click **Skip touch** in the modal. The touch is logged with channel = `skipped` and the cadence advances to the next available touch.
