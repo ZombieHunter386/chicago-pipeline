@@ -433,19 +433,65 @@ def register(app: Flask) -> None:
         @app.get("/api/parcels/<pin>/outreach")
         def api_parcel_outreach(pin: str):
             with closing(_conn()) as conn:
-                _parcel_or_404(conn, pin)
+                parcel = _parcel_or_404(conn, pin)
                 contact = conn.execute(
                     "SELECT * FROM contacts WHERE pin = ? LIMIT 1", (pin,)
                 ).fetchone()
                 outreach_rows = outreach_module.list_outreach_for_parcel(conn, pin)
+                outreach_dicts = [dict(r) for r in outreach_rows]
+
+            # Compute sequence state
+            cadence = _load_cadence()
+            today = _today()
+            by_touch = {
+                r["touch_number"]: r for r in outreach_dicts
+                if r.get("touch_number") is not None
+            }
+            anchor_row = by_touch.get(1)
+            anchor_date = (
+                anchor_row["sent_date"][:10]
+                if anchor_row and anchor_row.get("sent_date") else None
+            )
+            current_touch = max(by_touch.keys()) if by_touch else 0
+            is_paused = bool(parcel.get("outreach_paused"))
+            is_eos = cadence_module.is_end_of_sequence(
+                cadence_config=cadence, outreach_rows=outreach_dicts, today=today,
+            )
+
+            next_due = None
+            if not is_paused:
+                due_list = cadence_module.next_due_touches_for_parcel(
+                    cadence_config=cadence,
+                    outreach_rows=outreach_dicts,
+                    contact=dict(contact) if contact else None,
+                    parcel_mail_address=parcel.get("mail_address"),
+                    today=today,
+                )
+                if due_list:
+                    n = due_list[0]
+                    next_due = {
+                        "touch": n["touch"],
+                        "channel": n["channel"],
+                        "target_date": n["target_date"],
+                        "days_overdue": n["days_overdue"],
+                        "available": True,
+                    }
+
             return jsonify({
                 "pin": pin,
                 "contact": dict(contact) if contact else None,
-                "outreach": [dict(r) for r in outreach_rows],
+                "outreach": outreach_dicts,
                 "gmail_connected": gmail_client.is_connected(
                     Path(app.config["GMAIL_TOKEN_PATH"])
                 ),
                 "sender_address": app.config.get("GMAIL_SENDER_ADDRESS") or "",
+                "sequence": {
+                    "anchor_date": anchor_date,
+                    "current_touch": current_touch,
+                    "next_due": next_due,
+                    "is_end_of_sequence": is_eos,
+                    "is_paused": is_paused,
+                },
             })
 
         @app.get("/api/outreach/templates")
@@ -648,6 +694,9 @@ def register(app: Flask) -> None:
             to = data.get("to") or ""
             subject = data.get("subject")
             body = data.get("body")
+            touch_number = data.get("touch_number", 1)
+            if not isinstance(touch_number, int) or touch_number < 1:
+                abort(400, "touch_number must be a positive integer")
             if not pin.isdigit() or len(pin) != 14:
                 abort(400, "invalid pin")
             if not EMAIL_RE.match(to):
@@ -662,6 +711,22 @@ def register(app: Flask) -> None:
 
             with closing(_conn()) as conn:
                 _parcel_or_404(conn, pin)
+                # Validate the touch_number is next-due for this parcel.
+                outreach_rows = [
+                    dict(r) for r in conn.execute(
+                        "SELECT * FROM outreach WHERE pin = ? "
+                        "ORDER BY touch_number",
+                        (pin,),
+                    )
+                ]
+                try:
+                    outreach_module.validate_next_due_touch(
+                        outreach_rows=outreach_rows,
+                        touch_number=touch_number,
+                    )
+                except ValueError as e:
+                    abort(400, str(e))
+
                 cid = outreach_module.upsert_contact(
                     conn, pin=pin, email=to, source="manual"
                 )
@@ -679,16 +744,19 @@ def register(app: Flask) -> None:
                     # Surface a 503 with the actual reason so the UI can show it.
                     abort(503, f"Gmail API error: {e}")
 
-                oid = outreach_module.create_outreach_record(
-                    conn, pin=pin, contact_id=cid,
-                    channel="email", subject=subject, body=body,
-                    sent_date=_now_iso(),
-                )
-                # Persist the Gmail message id in `notes` (cheap; avoids a
-                # schema change to add a dedicated column).
+                try:
+                    oid = outreach_module.create_outreach_record(
+                        conn, pin=pin, contact_id=cid,
+                        channel="email", subject=subject, body=body,
+                        sent_date=_now_iso(),
+                        touch_number=touch_number,
+                    )
+                except sqlite3.IntegrityError:
+                    abort(409, "touch already completed (race detected)")
+                # Persist the Gmail message id in its dedicated column.
                 conn.execute(
-                    "UPDATE outreach SET notes = ? WHERE outreach_id = ?",
-                    (f"gmail_message_id={result.get('id','')}", oid),
+                    "UPDATE outreach SET gmail_message_id = ? WHERE outreach_id = ?",
+                    (result.get("id", ""), oid),
                 )
                 # Auto-transition: scored → outreach on first successful send.
                 conn.execute(
