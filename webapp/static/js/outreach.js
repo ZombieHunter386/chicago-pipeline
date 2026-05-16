@@ -522,6 +522,38 @@
 
   window.__outreachRenderDueToday = renderDueToday;
 
+  async function fetchDigestHealth() {
+    const resp = await fetch('/api/health/digest');
+    if (!resp.ok) return null;
+    return resp.json();
+  }
+
+  async function renderDigestHealthBadge() {
+    const bar = document.getElementById('due-today-bar');
+    if (!bar) return;
+    let health;
+    try { health = await fetchDigestHealth(); } catch (_) { return; }
+    if (!health) return;
+    // Remove existing badge if present
+    const existing = bar.querySelector('.digest-health-badge');
+    if (existing) existing.remove();
+    if (!health.stale) return;  // healthy → no badge
+    const badge = document.createElement('span');
+    badge.className = 'digest-health-badge';
+    badge.title = health.last_run
+      ? `Last digest run: ${health.last_run}`
+      : 'Digest has never run';
+    badge.textContent = health.last_run
+      ? '⚠ Digest stale'
+      : '⚠ Digest not running';
+    bar.appendChild(badge);
+    // Show the bar even if Due Today is empty when the digest is unhealthy
+    bar.hidden = false;
+  }
+
+  window.addEventListener('DOMContentLoaded', () => { renderDigestHealthBadge(); });
+  window.addEventListener('outreach:refresh', () => { renderDigestHealthBadge(); });
+
   // ---------- Compose modal ----------
 
   async function fetchTemplates(pin) {

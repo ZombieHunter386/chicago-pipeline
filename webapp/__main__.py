@@ -35,6 +35,8 @@ def main() -> None:
     gmail_token = os.environ.get("GMAIL_TOKEN_PATH")
     gmail_sender = os.environ.get("GMAIL_SENDER_ADDRESS")
     esri_api_key = os.environ.get("ESRI_API_KEY")
+    digest_last_run = os.environ.get("DUE_DIGEST_LAST_RUN_PATH",
+                                     "data/due_digest_last_run.txt")
 
     if args.outreach:
         # oauthlib refuses to do OAuth over plain HTTP by default; the local
@@ -51,6 +53,7 @@ def main() -> None:
         gmail_token_path=Path(gmail_token) if gmail_token else None,
         gmail_sender_address=gmail_sender,
         esri_api_key=esri_api_key,
+        due_digest_last_run_path=Path(digest_last_run),
     )
     app.run(host="127.0.0.1", port=args.port, debug=args.debug)
 

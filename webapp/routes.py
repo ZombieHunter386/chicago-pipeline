@@ -2,7 +2,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from flask import Flask, abort, current_app, jsonify, redirect, render_template, request, url_for
@@ -559,6 +559,30 @@ def register(app: Flask) -> None:
         @app.get("/api/cadence/config")
         def api_cadence_config():
             return jsonify(_load_cadence())
+
+        @app.get("/api/health/digest")
+        def api_health_digest():
+            """Returns the last-known-good timestamp of the daily digest
+            cron + a stale flag. Used by the UI to warn when the digest
+            hasn't fired (Mac was off, cron is broken, etc.). When the
+            config has no sentinel path set (e.g., in tests with no
+            override), reports as not-configured rather than crashing."""
+            raw = app.config.get("DUE_DIGEST_LAST_RUN_PATH")
+            if raw is None:
+                return jsonify({"last_run": None, "stale": True,
+                                "reason": "not configured"})
+            p = Path(raw)
+            if not p.exists():
+                return jsonify({"last_run": None, "stale": True,
+                                "reason": "no sentinel file yet"})
+            try:
+                ts_text = p.read_text().strip()
+                ts = datetime.fromisoformat(ts_text.replace("Z", "+00:00"))
+            except (ValueError, OSError):
+                return jsonify({"last_run": None, "stale": True,
+                                "reason": "unparseable sentinel"})
+            stale = (datetime.now(timezone.utc) - ts) > timedelta(hours=25)
+            return jsonify({"last_run": ts_text, "stale": stale})
 
         @app.post("/api/outreach/log-manual-touch")
         def api_outreach_log_manual_touch():

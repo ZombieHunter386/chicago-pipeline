@@ -223,3 +223,7 @@ Outreach state lives in your local SQLite file (`data/full.alt.db`). Run a backu
 ```
 
 This dumps just the `outreach`, `contacts`, and `waves` tables to a timestamped `.sql` file under `data/`. The last 30 daily backups are kept; older ones are pruned.
+
+### Digest observability
+
+The daily digest writes a sentinel file (`data/due_digest_last_run.txt`) on every run (including empty-day runs). The UI surfaces a "⚠ Digest stale" badge in the Due Today bar when the sentinel is older than 25 hours, or absent. Check `data/due_digest.log` for the underlying error.

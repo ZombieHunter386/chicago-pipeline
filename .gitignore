@@ -16,3 +16,7 @@ data/gmail_oauth_client.json
 
 # Outreach backup dumps
 data/outreach_backup_*.sql
+
+# Cadence digest runtime artifacts — local-only
+data/due_digest.log
+data/due_digest_last_run.txt

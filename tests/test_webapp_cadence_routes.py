@@ -73,6 +73,7 @@ def app_on(db_path, cadence_path, templates_path, tmp_path):
         db_path=db_path, feature_outreach=True,
         outreach_templates_path=templates_path,
         outreach_cadence_path=cadence_path,
+        due_digest_last_run_path=tmp_path / "last_run.txt",
         clock=lambda: date(2026, 5, 11),  # pinned for deterministic tests
         gmail_client_secrets_path=tmp_path / "client.json",
         gmail_token_path=tmp_path / "token.json",
@@ -320,3 +321,32 @@ def test_pause_parcel_unpause_clears_flag(app_on, db_path):
     # And the parcel is back in due
     groups = client.get("/api/outreach/due").get_json()["groups"]
     assert len(groups) > 0  # touch 2 due (anchor 5-08, today 5-11)
+
+
+def test_health_digest_no_sentinel_means_stale(app_on):
+    resp = app_on.test_client().get("/api/health/digest")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["stale"] is True
+    assert data["last_run"] is None
+
+
+def test_health_digest_recent_sentinel_not_stale(app_on, tmp_path):
+    from datetime import datetime, timezone
+    sentinel = Path(app_on.config["DUE_DIGEST_LAST_RUN_PATH"])
+    sentinel.parent.mkdir(parents=True, exist_ok=True)
+    sentinel.write_text(datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    resp = app_on.test_client().get("/api/health/digest")
+    data = resp.get_json()
+    assert data["stale"] is False
+    assert data["last_run"] is not None
+
+
+def test_health_digest_old_sentinel_is_stale(app_on, tmp_path):
+    sentinel = Path(app_on.config["DUE_DIGEST_LAST_RUN_PATH"])
+    sentinel.parent.mkdir(parents=True, exist_ok=True)
+    # 2 days old
+    sentinel.write_text("2026-05-13T09:00:00Z")
+    resp = app_on.test_client().get("/api/health/digest")
+    data = resp.get_json()
+    assert data["stale"] is True

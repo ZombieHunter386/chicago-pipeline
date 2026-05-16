@@ -16,6 +16,7 @@ def create_app(
     gmail_token_path: Path | None = None,
     gmail_sender_address: str | None = None,
     esri_api_key: str | None = None,
+    due_digest_last_run_path: Path | None = None,
 ) -> Flask:
     app = Flask(
         __name__,
@@ -47,6 +48,10 @@ def create_app(
     # Without it, map.js falls back to the anonymous URL (fine for hobby
     # local dev; hits "Account Limit Exceeded" under deployed traffic).
     app.config["ESRI_API_KEY"] = esri_api_key or ""
+    # Default is None — the health endpoint treats that as "no observability
+    # configured" rather than reading a real path. Tests and prod each set
+    # their own path explicitly. Avoids relative-path test pollution.
+    app.config["DUE_DIGEST_LAST_RUN_PATH"] = due_digest_last_run_path
 
     from webapp import routes
     routes.register(app)
