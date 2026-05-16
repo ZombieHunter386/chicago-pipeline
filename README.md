@@ -213,3 +213,13 @@ The compose modal's Save template button writes back to `config/outreach_templat
 ### Skipping a touch
 
 If a touch's `requires` field isn't satisfied (e.g., no phone for touch 3), the cadence engine silently skips it — it never surfaces in Due Today. If you have the contact info but choose not to use a channel (e.g., have the phone but don't want to call), open the touch via Compose and click **Skip touch** in the modal. The touch is logged with channel = `skipped` and the cadence advances to the next available touch.
+
+### Backups
+
+Outreach state lives in your local SQLite file (`data/full.alt.db`). Run a backup before any risky operation:
+
+```bash
+./scripts/backup_outreach.sh
+```
+
+This dumps just the `outreach`, `contacts`, and `waves` tables to a timestamped `.sql` file under `data/`. The last 30 daily backups are kept; older ones are pruned.
