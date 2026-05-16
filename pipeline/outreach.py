@@ -294,7 +294,12 @@ def validate_next_due_touch(
     parcel's outreach history. The route layer calls this before writing a
     new outreach row to catch out-of-order or duplicate sends server-side
     (the partial unique index on (pin, touch_number) catches races; this
-    catches clean-but-wrong client requests with a clearer error)."""
+    catches clean-but-wrong client requests with a clearer error).
+
+    Contract: 'next-due' = max(completed touches) + 1. Assumes the DB
+    invariant that completed touches are contiguous starting at 1 — gaps
+    (e.g., [1, 3] without 2) cause this function to allow only touch 4,
+    not touch 2. Legacy rows with touch_number=None are filtered out."""
     done = {
         r["touch_number"]
         for r in outreach_rows

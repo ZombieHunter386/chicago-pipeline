@@ -16,6 +16,7 @@ from pipeline.outreach import (
     mark_replied,
     parcel_context,
     save_template,
+    validate_next_due_touch,
 )
 
 
@@ -320,9 +321,6 @@ def test_save_template_indents_sequence_items(tmp_path: Path) -> None:
 
 # ---------- validate_next_due_touch ----------
 
-from pipeline.outreach import validate_next_due_touch
-
-
 def test_validate_next_due_touch_accepts_touch_1_when_no_history():
     """Sending touch 1 is valid when the parcel has no prior outreach rows."""
     validate_next_due_touch(outreach_rows=[], touch_number=1)
@@ -346,3 +344,28 @@ def test_validate_next_due_touch_accepts_in_order():
     """After touch 1, touch 2 is the next-due touch."""
     rows = [{"touch_number": 1, "sent_date": "2026-05-08T09:00:00Z"}]
     validate_next_due_touch(outreach_rows=rows, touch_number=2)
+
+
+def test_validate_next_due_touch_ignores_legacy_null_touch_rows():
+    """Pre-cadence rows have touch_number=None and must not affect the
+    expected-touch calculation. This is the same filter pattern used in
+    pipeline/cadence.py."""
+    rows = [
+        {"touch_number": None, "sent_date": "2026-04-01T09:00:00Z"},
+        {"touch_number": 1, "sent_date": "2026-05-08T09:00:00Z"},
+    ]
+    # Touch 2 is next; legacy None row should be invisible
+    validate_next_due_touch(outreach_rows=rows, touch_number=2)
+
+
+def test_validate_next_due_touch_non_contiguous_history_uses_max():
+    """If the DB ever has [1, 3] without 2 (e.g., manual correction or prior
+    bug), the validator's contract is 'next after max', not 'fill the gap'.
+    A request for touch 4 succeeds; a request for touch 2 fails."""
+    rows = [
+        {"touch_number": 1, "sent_date": "2026-05-08T09:00:00Z"},
+        {"touch_number": 3, "sent_date": "2026-05-15T09:00:00Z"},
+    ]
+    validate_next_due_touch(outreach_rows=rows, touch_number=4)
+    with pytest.raises(ValueError, match="next-due"):
+        validate_next_due_touch(outreach_rows=rows, touch_number=2)
