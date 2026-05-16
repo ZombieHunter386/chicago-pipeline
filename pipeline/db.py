@@ -499,6 +499,15 @@ _LATER_COLUMNS = {
         # at rollup time. >0 means the rep's summed building_sf understates
         # the building total — UI surfaces this as "(SF incomplete)".
         ("condo_units_missing_sf_count", "INTEGER"),
+        # outreach_paused=1 stops the cadence engine from surfacing this parcel
+        # in Due Today. Manually toggled via POST /api/parcels/<pin>/pause.
+        ("outreach_paused", "INTEGER DEFAULT 0"),
+    ),
+    # Gmail message id from successful sends; null for manual touches.
+    # Replaces the prior "shove it into notes" hack — clean column, one
+    # purpose, easy to query.
+    "outreach": (
+        ("gmail_message_id", "TEXT"),
     ),
     # combined_building_sf was added to consolidation_groups in a prior commit
     # but the migration was never written; CREATE TABLE IF NOT EXISTS doesn't
@@ -529,6 +538,13 @@ def init_db(db_path: Path) -> None:
                 except sqlite3.OperationalError as e:
                     if "duplicate column" not in str(e).lower():
                         raise
+        # Partial unique index on outreach(pin, touch_number). Partial WHERE
+        # touch_number IS NOT NULL so legacy rows pre-cadence don't conflict.
+        # Prevents race-duplicates from concurrent send/log endpoints.
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_outreach_pin_touch_unique "
+            "ON outreach(pin, touch_number) WHERE touch_number IS NOT NULL"
+        )
         conn.commit()
     finally:
         conn.close()
