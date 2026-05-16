@@ -257,3 +257,66 @@ def test_pause_parcel_404_when_flag_off(app_off):
     assert app_off.test_client().post(
         "/api/parcels/14210010010000/pause", json={"paused": True}
     ).status_code == 404
+
+
+def test_log_manual_touch_creates_anchor_with_skipped_touch_1(app_on, db_path):
+    """skipped on touch 1 (mail-only campaign) creates the anchor row.
+    After it, future cadence touches start surfacing per the schedule."""
+    import sqlite3
+    # Replace the fixture's pre-seeded touch 1 with no outreach rows,
+    # so we test the "fresh parcel" anchor-creation path
+    conn = sqlite3.connect(db_path)
+    conn.execute("DELETE FROM outreach WHERE pin = ?", ("14210010010000",))
+    conn.commit()
+    conn.close()
+
+    # POST touch 1 with channel=skipped — this is the documented mail-only
+    # campaign starter (see spec line ~23)
+    resp = app_on.test_client().post(
+        "/api/outreach/log-manual-touch",
+        json={"pin": "14210010010000", "touch_number": 1,
+              "channel": "skipped",
+              "notes": "Mail-only campaign — no email available."},
+    )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    data = resp.get_json()
+    # next_touch should be touch 2 (email, day 3) — but the test fixture's
+    # contact has email so touch 2 surfaces normally. Anchor is today,
+    # touch 2 is day_offset=3, so target is 3 days from now. Not due yet
+    # at our pinned 2026-05-11 clock since we just made the anchor.
+    # The exact next_touch shape depends on the cfg in the fixture; just
+    # verify the row landed.
+    conn = sqlite3.connect(db_path)
+    row = conn.execute(
+        "SELECT channel, touch_number FROM outreach "
+        "WHERE outreach_id = ?", (data["outreach_id"],),
+    ).fetchone()
+    conn.close()
+    assert row[0] == "skipped"
+    assert row[1] == 1
+
+
+def test_pause_parcel_unpause_clears_flag(app_on, db_path):
+    """Round-trip: pause, then unpause. The flag flips back to 0 and the
+    parcel reappears in /api/outreach/due."""
+    import sqlite3
+    client = app_on.test_client()
+    # Pause
+    client.post("/api/parcels/14210010010000/pause", json={"paused": True})
+    # Confirm hidden from due
+    assert client.get("/api/outreach/due").get_json()["groups"] == []
+    # Unpause
+    resp = client.post("/api/parcels/14210010010000/pause", json={"paused": False})
+    assert resp.status_code == 200
+    assert resp.get_json() == {"pin": "14210010010000", "paused": False}
+    # Confirm flag cleared
+    conn = sqlite3.connect(db_path)
+    flag = conn.execute(
+        "SELECT outreach_paused FROM parcels WHERE pin = ?",
+        ("14210010010000",),
+    ).fetchone()[0]
+    conn.close()
+    assert flag == 0
+    # And the parcel is back in due
+    groups = client.get("/api/outreach/due").get_json()["groups"]
+    assert len(groups) > 0  # touch 2 due (anchor 5-08, today 5-11)

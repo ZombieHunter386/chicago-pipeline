@@ -568,15 +568,17 @@ def register(app: Flask) -> None:
                         sent_date=_now_iso(),
                         touch_number=touch_number,
                     )
-                    if notes:
-                        conn.execute(
-                            "UPDATE outreach SET notes = ? "
-                            "WHERE outreach_id = ?",
-                            (notes, oid),
-                        )
-                        conn.commit()
                 except sqlite3.IntegrityError:
                     abort(409, "touch already completed")
+                if notes:
+                    # create_outreach_record writes body into draft_body+final_body,
+                    # not the dedicated notes column — separate UPDATE to keep
+                    # the helper signature clean.
+                    conn.execute(
+                        "UPDATE outreach SET notes = ? WHERE outreach_id = ?",
+                        (notes, oid),
+                    )
+                    conn.commit()
                 # Compute next due so the UI can update without a refetch.
                 outreach_rows.append({
                     "touch_number": touch_number,
