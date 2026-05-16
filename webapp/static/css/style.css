@@ -477,3 +477,46 @@
 
 /* Adjust main panel offset when the bar is present */
 .main.has-due-bar { /* spacing handled by the flex layout — no extra margin needed */ }
+
+/* ===== Sequence timeline ===== */
+.seq-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 6px;
+}
+.seq-row {
+  display: grid;
+  grid-template-columns: 16px 18px 60px 1fr;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  padding: 4px 0;
+}
+.seq-icon { text-align: center; font-size: 14px; }
+.seq-num  { color: #8b949e; }
+.seq-channel { color: #c9d1d9; }
+.seq-date { color: #8b949e; }
+.seq-row-done .seq-icon { color: #3fb950; }
+.seq-row-current .seq-icon { color: #f0883e; }
+.seq-row-future .seq-icon { color: #484f58; }
+.seq-row-current { background: rgba(240, 136, 62, 0.06); border-radius: 4px; }
+.seq-req-missing { color: #8b949e; font-style: italic; font-size: 11px; }
+.seq-paused-badge {
+  display: inline-block;
+  background: #484f58;
+  color: white;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  margin-left: 6px;
+}
+.seq-eos-badge {
+  display: inline-block;
+  background: #3fb950;
+  color: white;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  margin-left: 6px;
+}

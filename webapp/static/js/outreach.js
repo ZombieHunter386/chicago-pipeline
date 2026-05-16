@@ -226,18 +226,24 @@
 
   // ---------- Stage section ----------
 
-  function renderStageSection(parcel) {
+  function renderStageSection(parcel, data) {
     const el = document.createElement('div');
     el.className = 'detail-section';
     const stages = ['scored', 'outreach', 'responded', 'introduced', 'dead'];
     const cur = parcel.stage || 'scored';
+    const seq = (data && data.sequence) || {};
+    const showPause = cur === 'outreach' && seq.anchor_date;
+    const showMarkDead = seq.is_end_of_sequence && cur !== 'dead';
+
     el.innerHTML = `
       <h3>Stage</h3>
       <div class="detail-grid" style="grid-template-columns: 1fr;">
-        <div class="detail-item">
+        <div class="detail-item" style="display:flex; gap:8px; align-items:center; flex-wrap: wrap;">
           <select id="outreach-stage-select" class="outreach-input outreach-stage-select">
             ${stages.map(s => `<option value="${s}"${s === cur ? ' selected' : ''}>${s}</option>`).join('')}
           </select>
+          ${showPause ? `<button type="button" class="btn btn-sm" id="outreach-pause-btn">${seq.is_paused ? '▶ Resume cadence' : '⏸ Pause cadence'}</button>` : ''}
+          ${showMarkDead ? '<button type="button" class="btn btn-sm" id="outreach-mark-dead-btn">Mark dead</button>' : ''}
         </div>
       </div>
     `;
@@ -246,11 +252,120 @@
       try {
         await setStage(parcel.pin, sel.value);
         showToast('Stage updated to "' + sel.value + '"', 'success');
+        window.dispatchEvent(new CustomEvent('outreach:refresh',
+                                              { detail: { pin: parcel.pin } }));
       } catch (e) {
         showToast("Couldn't update stage", 'error');
       }
     });
+    const pauseBtn = el.querySelector('#outreach-pause-btn');
+    if (pauseBtn) {
+      pauseBtn.addEventListener('click', async () => {
+        const target = !seq.is_paused;
+        try {
+          await fetch(`/api/parcels/${encodeURIComponent(parcel.pin)}/pause`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({paused: target}),
+          });
+          showToast(target ? 'Cadence paused' : 'Cadence resumed', 'success');
+          window.dispatchEvent(new CustomEvent('outreach:refresh',
+                                                { detail: { pin: parcel.pin } }));
+        } catch (e) {
+          showToast("Couldn't toggle pause", 'error');
+        }
+      });
+    }
+    const deadBtn = el.querySelector('#outreach-mark-dead-btn');
+    if (deadBtn) {
+      deadBtn.addEventListener('click', async () => {
+        try {
+          await setStage(parcel.pin, 'dead');
+          showToast('Marked dead', 'success');
+          window.dispatchEvent(new CustomEvent('outreach:refresh',
+                                                { detail: { pin: parcel.pin } }));
+        } catch (e) {
+          showToast("Couldn't mark dead", 'error');
+        }
+      });
+    }
     return el;
+  }
+
+  // ---------- Sequence timeline ----------
+
+  async function fetchCadenceConfig() {
+    const resp = await fetch('/api/cadence/config');
+    if (!resp.ok) throw new Error(`fetch cadence failed: ${resp.status}`);
+    return resp.json();
+  }
+
+  // Cache the cadence config per page-load; reload on outreach:refresh
+  let __cachedCadence = null;
+  async function getCadenceConfig() {
+    if (__cachedCadence) return __cachedCadence;
+    __cachedCadence = await fetchCadenceConfig();
+    return __cachedCadence;
+  }
+  window.addEventListener('outreach:refresh', () => { __cachedCadence = null; });
+
+  function renderSequenceSection(parcel, data, cadence) {
+    const el = document.createElement('div');
+    el.className = 'detail-section';
+    const seq = data.sequence || {};
+
+    if (!seq.anchor_date) {
+      // Parcel hasn't entered cadence — show a "Start cadence" prompt
+      el.innerHTML = `
+        <h3>Sequence</h3>
+        <div style="font-size:12px; color:#8b949e;">
+          No outreach yet. Compose touch 1 to start the cadence.
+        </div>
+      `;
+      return el;
+    }
+
+    const completed = {};
+    (data.outreach || []).forEach(r => {
+      if (r.touch_number != null) completed[r.touch_number] = r;
+    });
+
+    const rows = cadence.sequence.map(t => {
+      const done = completed[t.touch];
+      const isNext = seq.next_due && seq.next_due.touch === t.touch;
+      let status = 'future';
+      if (done) status = 'done';
+      else if (isNext) status = 'current';
+
+      const targetDate = anchorPlus(seq.anchor_date, t.day_offset);
+      const reqMissing = isNext && seq.next_due && !seq.next_due.available;
+      return `
+        <div class="seq-row seq-row-${status}">
+          <span class="seq-icon">${status === 'done' ? '✓' : (status === 'current' ? '●' : '○')}</span>
+          <span class="seq-num">${t.touch}</span>
+          <span class="seq-channel">${t.channel}</span>
+          <span class="seq-date">${done ? `sent ${(done.sent_date || '').slice(0,10)}` : `due ${targetDate}`}</span>
+          ${reqMissing ? '<span class="seq-req-missing">(no ' + escapeHtml(t.requires) + ')</span>' : ''}
+        </div>
+      `;
+    }).join('');
+
+    const pausedBadge = seq.is_paused
+      ? '<span class="seq-paused-badge">paused</span>' : '';
+    const eosBadge = seq.is_end_of_sequence
+      ? '<span class="seq-eos-badge">Sequence complete</span>' : '';
+
+    el.innerHTML = `
+      <h3>Sequence — Touch ${seq.current_touch || 0} of ${cadence.sequence.length} ${pausedBadge} ${eosBadge}</h3>
+      <div class="seq-rows">${rows}</div>
+    `;
+    return el;
+  }
+
+  function anchorPlus(anchorIso, days) {
+    const d = new Date(anchorIso + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
   }
 
   // ---------- Public API ----------
@@ -259,9 +374,9 @@
     // Snapshot the panel's render serial at call time. If a newer render
     // bumps it before our fetch returns, we're stale — bail without appending.
     const serial = panel.dataset.renderSerial;
-    let data;
+    let data, cadence;
     try {
-      data = await fetchOutreach(parcel.pin);
+      [data, cadence] = await Promise.all([fetchOutreach(parcel.pin), getCadenceConfig()]);
     } catch (_) {
       if (panel.dataset.renderSerial !== serial) return;
       const err = document.createElement('div');
@@ -271,7 +386,8 @@
       return;
     }
     if (panel.dataset.renderSerial !== serial) return;
-    panel.appendChild(renderStageSection(parcel));
+    panel.appendChild(renderStageSection(parcel, data));
+    panel.appendChild(renderSequenceSection(parcel, data, cadence));
     panel.appendChild(renderContactSection(parcel, data));
     panel.appendChild(renderHistorySection(parcel, data));
   }
