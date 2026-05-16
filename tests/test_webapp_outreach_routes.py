@@ -456,13 +456,13 @@ def test_send_outreach_accepts_touch_number(app_on, outreach_db_path):
 
 
 def test_send_outreach_rejects_out_of_order_touch(app_on):
-    """Posting touch 5 when only touch 1 has been done → 400."""
-    with patch("webapp.routes.gmail_client.send_email") as send_mock:
-        send_mock.return_value = {"id": "m", "threadId": "t"}
-        resp = app_on.test_client().post("/api/outreach/send", json={
-            "pin": "14210010010000", "to": "x@y.com",
-            "subject": "s", "body": "b", "touch_number": 5,
-        })
+    """Posting touch 5 on a parcel with no prior outreach history → 400
+    (expected touch is 1; 5 is out of order). validate_next_due_touch
+    catches this before any Gmail send happens — no mock needed."""
+    resp = app_on.test_client().post("/api/outreach/send", json={
+        "pin": "14210010010000", "to": "x@y.com",
+        "subject": "s", "body": "b", "touch_number": 5,
+    })
     assert resp.status_code == 400
 
 
@@ -543,6 +543,8 @@ def test_get_parcel_outreach_includes_sequence_block(app_on, outreach_db_path):
 
 
 def test_get_parcel_outreach_sequence_paused(app_on, outreach_db_path):
+    """When a parcel is paused, the sequence block reports it AND
+    suppresses next_due (the cadence engine never gets called)."""
     import sqlite3
     conn = sqlite3.connect(outreach_db_path)
     conn.execute(
@@ -552,4 +554,9 @@ def test_get_parcel_outreach_sequence_paused(app_on, outreach_db_path):
     conn.commit()
     conn.close()
     resp = app_on.test_client().get("/api/parcels/14210010010000/outreach")
-    assert resp.get_json()["sequence"]["is_paused"] is True
+    seq = resp.get_json()["sequence"]
+    assert seq["is_paused"] is True
+    # With no outreach rows AND paused, all derived fields stay defaults
+    assert seq["next_due"] is None
+    assert seq["anchor_date"] is None
+    assert seq["current_touch"] == 0
