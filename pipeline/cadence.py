@@ -209,6 +209,7 @@ def all_due_touches(conn, cadence_config: dict, today: date) -> dict:
                 "owner_name": p["owner_name"],
                 "owner_first_name": owner_first,
                 "touch": d["touch"],
+                "channel": d["channel"],  # self-describing — downstream code can read directly
                 "template": d["template"],
                 "target_date": d["target_date"],
                 "days_overdue": d["days_overdue"],
@@ -217,6 +218,10 @@ def all_due_touches(conn, cadence_config: dict, today: date) -> dict:
                 item["to_email"] = contact.get("email")
             elif d["channel"] == "phone" and contact:
                 item["to_phone"] = contact.get("phone")
+            elif d["channel"] == "mail":
+                # Mail address always present from assessor data — populate the
+                # target so the digest and compose UI don't have to refetch.
+                item["to_mail_address"] = p["mail_address"]
             groups[d["channel"]].append(item)
 
         if is_end_of_sequence(

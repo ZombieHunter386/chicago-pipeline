@@ -4,11 +4,13 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+import sqlite3
 
 from pipeline.cadence import (
     load_cadence_config,
     next_due_touches_for_parcel,
     is_end_of_sequence,
+    all_due_touches,
 )
 
 
@@ -259,9 +261,6 @@ def test_end_of_sequence_false_when_last_touch_has_no_sent_date(cfg):
 
 # ---------- all_due_touches (DB orchestrator) ----------
 
-import sqlite3
-from pipeline.cadence import all_due_touches
-
 
 @pytest.fixture
 def db(tmp_path):
@@ -381,3 +380,49 @@ def test_all_due_touches_surfaces_end_of_sequence(db, cfg):
     assert item["pin"] == "14210010010000"
     assert item["suggest"] == "mark_dead"
     assert item["days_since_last"] > 30
+
+
+def test_all_due_touches_includes_channel_and_to_address_on_each_item(db, cfg):
+    """Items are self-describing: every item has a `channel` key, email items
+    carry to_email, phone items carry to_phone, and (when applicable in a
+    fuller cfg) mail items carry to_mail_address."""
+    db.executescript("""
+        INSERT INTO parcels (pin, address, owner_name, mail_address, stage)
+        VALUES ('14210010010000', '123 W Main', 'JANE DOE', '500 N Main', 'outreach');
+        INSERT INTO contacts (pin, email, phone) VALUES ('14210010010000', 'j@b.com', NULL);
+        INSERT INTO outreach (pin, touch_number, channel, sent_date)
+        VALUES ('14210010010000', 1, 'email', '2026-05-08T09:00:00Z');
+    """)
+    db.commit()
+    out = all_due_touches(db, cfg, date(2026, 5, 11))
+    email_items = next(g["items"] for g in out["groups"] if g["channel"] == "email")
+    assert email_items[0]["channel"] == "email"
+    assert email_items[0]["to_email"] == "j@b.com"
+
+
+def test_all_due_touches_mail_items_carry_mail_address(db, tmp_path):
+    """In a cadence with a mail touch, items get to_mail_address populated
+    from the parcel's mail_address. The standard `cfg` fixture has no mail
+    touches, so build a one-touch mail cadence inline."""
+    mail_cfg = {
+        "sequence": [
+            {"touch": 1, "day_offset": 0, "channel": "email",
+             "template": "t1", "requires": "email"},
+            {"touch": 2, "day_offset": 7, "channel": "mail",
+             "template": "letter", "requires": "mail_address"},
+        ],
+        "end_of_sequence_action": "surface_for_dead",
+        "end_of_sequence_grace_days": 0,
+    }
+    db.executescript("""
+        INSERT INTO parcels (pin, address, owner_name, mail_address, stage)
+        VALUES ('14210010010000', '123 W Main', 'JANE DOE', '999 PO Box', 'outreach');
+        INSERT INTO contacts (pin, email) VALUES ('14210010010000', 'j@b.com');
+        INSERT INTO outreach (pin, touch_number, channel, sent_date)
+        VALUES ('14210010010000', 1, 'email', '2026-05-01T09:00:00Z');
+    """)
+    db.commit()
+    out = all_due_touches(db, mail_cfg, date(2026, 5, 9))  # touch 2 due day 7+
+    mail_items = next(g["items"] for g in out["groups"] if g["channel"] == "mail")
+    assert mail_items[0]["channel"] == "mail"
+    assert mail_items[0]["to_mail_address"] == "999 PO Box"
