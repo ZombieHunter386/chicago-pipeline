@@ -159,3 +159,98 @@ def is_end_of_sequence(
     last_date = _parse_iso_date(last_row["sent_date"])
     grace = cadence_config["end_of_sequence_grace_days"]
     return (today - last_date).days >= grace
+
+
+def all_due_touches(conn, cadence_config: dict, today: date) -> dict:
+    """DB-touching orchestrator. Queries parcels in `outreach` stage (and
+    not paused), joins contacts + outreach history, runs the pure functions,
+    returns the JSON-shaped structure documented in the spec.
+    """
+    # Import here to avoid a circular import between outreach.py and cadence.py.
+    from pipeline.outreach import parcel_context
+
+    rows = conn.execute(
+        """
+        SELECT pin, address, owner_name, mail_address, score,
+               COALESCE(outreach_paused, 0) AS outreach_paused
+        FROM parcels
+        WHERE stage = 'outreach'
+          AND COALESCE(outreach_paused, 0) = 0
+        """
+    ).fetchall()
+
+    groups = {"email": [], "phone": [], "mail": [], "end_of_sequence": []}
+
+    for p in rows:
+        pin = p["pin"]
+        contact_row = conn.execute(
+            "SELECT * FROM contacts WHERE pin = ? LIMIT 1", (pin,)
+        ).fetchone()
+        contact = dict(contact_row) if contact_row else None
+        outreach_rows = [
+            dict(r) for r in conn.execute(
+                "SELECT * FROM outreach WHERE pin = ? ORDER BY touch_number",
+                (pin,),
+            )
+        ]
+        owner_first = parcel_context(dict(p), {})["owner_first_name"]
+
+        due = next_due_touches_for_parcel(
+            cadence_config=cadence_config,
+            outreach_rows=outreach_rows,
+            contact=contact,
+            parcel_mail_address=p["mail_address"],
+            today=today,
+        )
+        for d in due:
+            item = {
+                "pin": pin,
+                "address": p["address"],
+                "owner_name": p["owner_name"],
+                "owner_first_name": owner_first,
+                "touch": d["touch"],
+                "template": d["template"],
+                "target_date": d["target_date"],
+                "days_overdue": d["days_overdue"],
+            }
+            if d["channel"] == "email" and contact:
+                item["to_email"] = contact.get("email")
+            elif d["channel"] == "phone" and contact:
+                item["to_phone"] = contact.get("phone")
+            groups[d["channel"]].append(item)
+
+        if is_end_of_sequence(
+            cadence_config=cadence_config,
+            outreach_rows=outreach_rows,
+            today=today,
+        ):
+            by_touch = {
+                r["touch_number"]: r for r in outreach_rows
+                if r.get("touch_number") is not None
+            }
+            last_n = max(by_touch)
+            last_row = by_touch[last_n]
+            last_date = last_row["sent_date"][:10] if last_row.get("sent_date") else None
+            days_since = (
+                (today - _parse_iso_date(last_row["sent_date"])).days
+                if last_row.get("sent_date") else 0
+            )
+            groups["end_of_sequence"].append({
+                "pin": pin,
+                "address": p["address"],
+                "owner_first_name": owner_first,
+                "last_touch_date": last_date,
+                "days_since_last": days_since,
+                "suggest": "mark_dead",
+            })
+
+    response_groups = []
+    for channel in ("email", "phone", "mail", "end_of_sequence"):
+        items = groups[channel]
+        if items:
+            response_groups.append({
+                "channel": channel,
+                "count": len(items),
+                "items": items,
+            })
+    return {"today": today.isoformat(), "groups": response_groups}

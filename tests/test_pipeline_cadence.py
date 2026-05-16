@@ -255,3 +255,129 @@ def test_end_of_sequence_false_when_last_touch_has_no_sent_date(cfg):
     assert is_end_of_sequence(
         cadence_config=cfg, outreach_rows=rows, today=date(2026, 5, 15),
     ) is False
+
+
+# ---------- all_due_touches (DB orchestrator) ----------
+
+import sqlite3
+from pipeline.cadence import all_due_touches
+
+
+@pytest.fixture
+def db(tmp_path):
+    """Minimal schema mirroring parcels/contacts/outreach for orchestrator
+    tests. Real schema lives in pipeline/db.py; we duplicate the parts we
+    touch here to keep these tests isolated from full init_db."""
+    conn = sqlite3.connect(tmp_path / "t.db")
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE parcels (
+            pin TEXT PRIMARY KEY, address TEXT, owner_name TEXT,
+            mail_address TEXT, score REAL, stage TEXT DEFAULT 'scored',
+            outreach_paused INTEGER DEFAULT 0
+        );
+        CREATE TABLE contacts (
+            contact_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pin TEXT, name TEXT, phone TEXT, email TEXT,
+            mailing_address TEXT, role TEXT, source TEXT
+        );
+        CREATE TABLE outreach (
+            outreach_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            wave_id INTEGER, pin TEXT, contact_id INTEGER, channel TEXT,
+            touch_number INTEGER, sent_date TEXT, response_date TEXT,
+            response_type TEXT, draft_subject TEXT, draft_body TEXT,
+            final_body TEXT, notes TEXT
+        );
+    """)
+    conn.commit()
+    return conn
+
+
+def test_all_due_touches_empty_when_no_outreach_parcels(db, cfg):
+    db.execute(
+        "INSERT INTO parcels (pin, stage) VALUES (?, ?)",
+        ("14210010010000", "scored"),
+    )
+    db.commit()
+    out = all_due_touches(db, cfg, date(2026, 5, 15))
+    assert out["today"] == "2026-05-15"
+    assert out["groups"] == []
+
+
+def test_all_due_touches_groups_by_channel(db, cfg):
+    """Two parcels in outreach stage: parcel A has touch 2 due (email),
+    parcel B has touch 3 due (phone). Result has two groups, one per channel."""
+    db.executescript("""
+        INSERT INTO parcels (pin, address, owner_name, mail_address, stage)
+        VALUES ('14210010010000', '123 W Main', 'JANE DOE', '500 N Main', 'outreach');
+        INSERT INTO parcels (pin, address, owner_name, mail_address, stage)
+        VALUES ('14210010020000', '456 W Halsted', 'JOHN ROE', '600 W Halsted', 'outreach');
+        INSERT INTO contacts (pin, email, phone) VALUES ('14210010010000', 'jane@example.com', NULL);
+        INSERT INTO contacts (pin, email, phone) VALUES ('14210010020000', 'john@example.com', '555-0123');
+        INSERT INTO outreach (pin, touch_number, channel, sent_date)
+        VALUES ('14210010010000', 1, 'email', '2026-05-08T09:00:00Z');
+        INSERT INTO outreach (pin, touch_number, channel, sent_date)
+        VALUES ('14210010020000', 1, 'email', '2026-05-01T09:00:00Z');
+        INSERT INTO outreach (pin, touch_number, channel, sent_date)
+        VALUES ('14210010020000', 2, 'email', '2026-05-05T09:00:00Z');
+    """)
+    db.commit()
+    out = all_due_touches(db, cfg, date(2026, 5, 11))
+    channels = {g["channel"]: g for g in out["groups"]}
+    # A: touch 2 (email) due 5-11 (anchor 5-8 + 3 days)
+    # B: touch 3 (phone) due 5-8 (anchor 5-1 + 7 days), overdue 3 days
+    assert "email" in channels
+    assert "phone" in channels
+    assert channels["email"]["count"] == 1
+    assert channels["email"]["items"][0]["pin"] == "14210010010000"
+    assert channels["phone"]["count"] == 1
+    assert channels["phone"]["items"][0]["pin"] == "14210010020000"
+    assert channels["phone"]["items"][0]["days_overdue"] == 3
+
+
+def test_all_due_touches_skips_paused(db, cfg):
+    db.executescript("""
+        INSERT INTO parcels (pin, address, mail_address, stage, outreach_paused)
+        VALUES ('14210010010000', '123 W Main', '500 N Main', 'outreach', 1);
+        INSERT INTO contacts (pin, email) VALUES ('14210010010000', 'a@b.com');
+        INSERT INTO outreach (pin, touch_number, channel, sent_date)
+        VALUES ('14210010010000', 1, 'email', '2026-05-08T09:00:00Z');
+    """)
+    db.commit()
+    out = all_due_touches(db, cfg, date(2026, 5, 12))
+    assert out["groups"] == []
+
+
+def test_all_due_touches_skips_responded(db, cfg):
+    db.executescript("""
+        INSERT INTO parcels (pin, address, mail_address, stage)
+        VALUES ('14210010010000', '123 W Main', '500 N Main', 'responded');
+        INSERT INTO contacts (pin, email) VALUES ('14210010010000', 'a@b.com');
+        INSERT INTO outreach (pin, touch_number, channel, sent_date)
+        VALUES ('14210010010000', 1, 'email', '2026-05-08T09:00:00Z');
+    """)
+    db.commit()
+    out = all_due_touches(db, cfg, date(2026, 5, 12))
+    assert out["groups"] == []
+
+
+def test_all_due_touches_surfaces_end_of_sequence(db, cfg):
+    """Parcel with all 3 touches completed (cfg has 3 touches) → appears in
+    end_of_sequence group with suggest=mark_dead."""
+    db.executescript("""
+        INSERT INTO parcels (pin, address, mail_address, stage)
+        VALUES ('14210010010000', '123 W Main', '500 N Main', 'outreach');
+        INSERT INTO contacts (pin, email, phone) VALUES ('14210010010000', 'a@b.com', '555-0100');
+        INSERT INTO outreach (pin, touch_number, channel, sent_date) VALUES
+            ('14210010010000', 1, 'email', '2026-04-01T09:00:00Z'),
+            ('14210010010000', 2, 'email', '2026-04-04T09:00:00Z'),
+            ('14210010010000', 3, 'phone', '2026-04-08T09:00:00Z');
+    """)
+    db.commit()
+    out = all_due_touches(db, cfg, date(2026, 5, 15))
+    channels = {g["channel"]: g for g in out["groups"]}
+    assert "end_of_sequence" in channels
+    item = channels["end_of_sequence"]["items"][0]
+    assert item["pin"] == "14210010010000"
+    assert item["suggest"] == "mark_dead"
+    assert item["days_since_last"] > 30
