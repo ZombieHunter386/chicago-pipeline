@@ -115,3 +115,145 @@ def test_get_cadence_config_returns_yaml_as_json(app_on):
 
 def test_get_cadence_config_404_when_flag_off(app_off):
     assert app_off.test_client().get("/api/cadence/config").status_code == 404
+
+
+def test_log_manual_touch_records_phone_touch(app_on, db_path):
+    """Posting a phone touch (touch 3) when touch 2 has been sent records
+    an outreach row with channel='phone' and the right touch_number."""
+    # Send touch 2 first to make touch 3 valid
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "INSERT INTO outreach (pin, touch_number, channel, sent_date) "
+        "VALUES (?, ?, ?, ?)",
+        ("14210010010000", 2, "email", "2026-05-11T09:00:00Z"),
+    )
+    conn.commit()
+    conn.close()
+
+    resp = app_on.test_client().post(
+        "/api/outreach/log-manual-touch",
+        json={"pin": "14210010010000", "touch_number": 3,
+              "channel": "phone", "notes": "Left voicemail at 2pm."},
+    )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    data = resp.get_json()
+    assert data["outreach_id"] > 0
+    # Verify the DB row
+    conn = sqlite3.connect(db_path)
+    row = conn.execute(
+        "SELECT channel, touch_number, notes FROM outreach "
+        "WHERE outreach_id = ?", (data["outreach_id"],),
+    ).fetchone()
+    conn.close()
+    assert row[0] == "phone"
+    assert row[1] == 3
+    assert "voicemail" in row[2]
+
+
+def test_log_manual_touch_rejects_wrong_channel(app_on, db_path):
+    """Posting channel='email' for touch 3 (which is configured as phone) → 400."""
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "INSERT INTO outreach (pin, touch_number, channel, sent_date) "
+        "VALUES (?, ?, ?, ?)",
+        ("14210010010000", 2, "email", "2026-05-11T09:00:00Z"),
+    )
+    conn.commit()
+    conn.close()
+    resp = app_on.test_client().post(
+        "/api/outreach/log-manual-touch",
+        json={"pin": "14210010010000", "touch_number": 3, "channel": "email"},
+    )
+    assert resp.status_code == 400
+
+
+def test_log_manual_touch_rejects_out_of_order(app_on):
+    """Posting touch 5 when only touch 1 has been done → 400."""
+    resp = app_on.test_client().post(
+        "/api/outreach/log-manual-touch",
+        json={"pin": "14210010010000", "touch_number": 5, "channel": "email"},
+    )
+    assert resp.status_code == 400
+
+
+def test_log_manual_touch_409_on_duplicate(app_on, db_path):
+    """Inserting a duplicate (pin, touch_number) violates the unique index → 409.
+    But validate-next-due catches it first as 'already done' → 400."""
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "INSERT INTO outreach (pin, touch_number, channel, sent_date) "
+        "VALUES (?, ?, ?, ?)",
+        ("14210010010000", 2, "email", "2026-05-11T09:00:00Z"),
+    )
+    conn.commit()
+    conn.close()
+    resp = app_on.test_client().post(
+        "/api/outreach/log-manual-touch",
+        json={"pin": "14210010010000", "touch_number": 2, "channel": "email"},
+    )
+    assert resp.status_code == 400  # caught by validate, before DB
+
+
+def test_log_manual_touch_404_when_flag_off(app_off):
+    assert app_off.test_client().post(
+        "/api/outreach/log-manual-touch", json={}
+    ).status_code == 404
+
+
+def test_log_manual_touch_accepts_skipped_channel(app_on, db_path):
+    """Logging touch 3 with channel='skipped' records the touch as done
+    without doing anything. The next touch surfaces normally."""
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "INSERT INTO outreach (pin, touch_number, channel, sent_date) "
+        "VALUES (?, ?, ?, ?)",
+        ("14210010010000", 2, "email", "2026-05-11T09:00:00Z"),
+    )
+    conn.commit()
+    conn.close()
+    resp = app_on.test_client().post(
+        "/api/outreach/log-manual-touch",
+        json={"pin": "14210010010000", "touch_number": 3,
+              "channel": "skipped", "notes": "Don't want to call."},
+    )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    conn = sqlite3.connect(db_path)
+    row = conn.execute(
+        "SELECT channel, touch_number FROM outreach "
+        "WHERE outreach_id = ?", (resp.get_json()["outreach_id"],),
+    ).fetchone()
+    conn.close()
+    assert row[0] == "skipped"
+    assert row[1] == 3
+
+
+def test_pause_parcel_sets_flag(app_on, db_path):
+    resp = app_on.test_client().post(
+        "/api/parcels/14210010010000/pause",
+        json={"paused": True},
+    )
+    assert resp.status_code == 200
+    assert resp.get_json() == {"pin": "14210010010000", "paused": True}
+    conn = sqlite3.connect(db_path)
+    flag = conn.execute(
+        "SELECT outreach_paused FROM parcels WHERE pin = ?",
+        ("14210010010000",),
+    ).fetchone()[0]
+    conn.close()
+    assert flag == 1
+
+
+def test_pause_parcel_hides_from_due(app_on, db_path):
+    # Pause it
+    app_on.test_client().post(
+        "/api/parcels/14210010010000/pause", json={"paused": True}
+    )
+    # Now it shouldn't appear in due (test clock pinned to 2026-05-11)
+    resp = app_on.test_client().get("/api/outreach/due")
+    assert resp.get_json()["groups"] == []
+
+
+def test_pause_parcel_404_when_flag_off(app_off):
+    assert app_off.test_client().post(
+        "/api/parcels/14210010010000/pause", json={"paused": True}
+    ).status_code == 404

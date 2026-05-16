@@ -514,6 +514,107 @@ def register(app: Flask) -> None:
         def api_cadence_config():
             return jsonify(_load_cadence())
 
+        @app.post("/api/outreach/log-manual-touch")
+        def api_outreach_log_manual_touch():
+            data = request.get_json(silent=True) or {}
+            pin = data.get("pin") or ""
+            touch_number = data.get("touch_number")
+            channel = data.get("channel")
+            notes = data.get("notes") or ""
+            if not pin.isdigit() or len(pin) != 14:
+                abort(400, "invalid pin")
+            if not isinstance(touch_number, int):
+                abort(400, "touch_number must be an integer")
+            if channel not in ("phone", "mail", "skipped"):
+                abort(400, "channel must be 'phone', 'mail', or 'skipped'")
+
+            cadence = _load_cadence()
+            tpl = next(
+                (t for t in cadence["sequence"] if t["touch"] == touch_number),
+                None,
+            )
+            if tpl is None:
+                abort(400, f"unknown touch_number {touch_number}")
+            # 'skipped' is always allowed regardless of the cadence's configured
+            # channel for this touch — the user chose not to do it.
+            if channel != "skipped" and tpl["channel"] != channel:
+                abort(
+                    400,
+                    f"touch {touch_number} channel is "
+                    f"{tpl['channel']!r}, not {channel!r}",
+                )
+
+            with closing(_conn()) as conn:
+                _parcel_or_404(conn, pin)
+                outreach_rows = [
+                    dict(r) for r in conn.execute(
+                        "SELECT * FROM outreach WHERE pin = ? "
+                        "ORDER BY touch_number",
+                        (pin,),
+                    )
+                ]
+                try:
+                    outreach_module.validate_next_due_touch(
+                        outreach_rows=outreach_rows,
+                        touch_number=touch_number,
+                    )
+                except ValueError as e:
+                    abort(400, str(e))
+                try:
+                    oid = outreach_module.create_outreach_record(
+                        conn, pin=pin, contact_id=None,
+                        channel=channel, subject="",
+                        body=notes,
+                        sent_date=_now_iso(),
+                        touch_number=touch_number,
+                    )
+                    if notes:
+                        conn.execute(
+                            "UPDATE outreach SET notes = ? "
+                            "WHERE outreach_id = ?",
+                            (notes, oid),
+                        )
+                        conn.commit()
+                except sqlite3.IntegrityError:
+                    abort(409, "touch already completed")
+                # Compute next due so the UI can update without a refetch.
+                outreach_rows.append({
+                    "touch_number": touch_number,
+                    "sent_date": _now_iso(),
+                })
+                contact_row = conn.execute(
+                    "SELECT * FROM contacts WHERE pin = ? LIMIT 1", (pin,)
+                ).fetchone()
+                contact = dict(contact_row) if contact_row else None
+                parcel_row = conn.execute(
+                    "SELECT mail_address FROM parcels WHERE pin = ?", (pin,)
+                ).fetchone()
+                due = cadence_module.next_due_touches_for_parcel(
+                    cadence_config=cadence,
+                    outreach_rows=outreach_rows,
+                    contact=contact,
+                    parcel_mail_address=parcel_row["mail_address"],
+                    today=_today(),
+                )
+                next_touch = due[0] if due else None
+
+            return jsonify({"outreach_id": oid, "next_touch": next_touch})
+
+        @app.post("/api/parcels/<pin>/pause")
+        def api_parcel_pause(pin: str):
+            data = request.get_json(silent=True) or {}
+            paused = bool(data.get("paused"))
+            if not pin.isdigit() or len(pin) != 14:
+                abort(400, "invalid pin")
+            with closing(_conn()) as conn:
+                _parcel_or_404(conn, pin)
+                conn.execute(
+                    "UPDATE parcels SET outreach_paused = ? WHERE pin = ?",
+                    (1 if paused else 0, pin),
+                )
+                conn.commit()
+            return jsonify({"pin": pin, "paused": paused})
+
         @app.post("/api/contacts/upsert")
         def api_contacts_upsert():
             data = request.get_json(silent=True) or {}
