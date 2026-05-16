@@ -2,6 +2,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 from dotenv import load_dotenv
+from pipeline.db import init_db
 from webapp.app import create_app
 
 
@@ -27,6 +28,13 @@ def main() -> None:
 
     if not args.db.exists():
         raise SystemExit(f"Database not found: {args.db}")
+
+    # Apply any pending _LATER_COLUMNS migrations to an existing DB. Idempotent:
+    # ALTER TABLE no-ops if the column exists. Without this, pulling code that
+    # adds a column leaves the dev DB out of sync until someone re-runs init_db
+    # manually — the failure mode is a 500 on the first query that touches the
+    # new column. Prod (wsgi.py) does its own migration handling.
+    init_db(args.db)
 
     # Outreach config reads from env so a developer can override paths without
     # touching code. All env vars are optional; defaults are baked into create_app.
