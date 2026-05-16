@@ -52,18 +52,21 @@ def cadence_path(tmp_path):
 
 def test_build_digest_returns_none_when_no_due(db_path, cadence_path):
     """A date before touch 2 is due → no digest."""
-    text = build_digest(db_path, cadence_path, date(2026, 5, 9), app_url="http://x")
-    assert text is None
+    result = build_digest(db_path, cadence_path, date(2026, 5, 9), app_url="http://x")
+    assert result is None
 
 
 def test_build_digest_returns_text_when_due_non_empty(db_path, cadence_path):
-    text = build_digest(db_path, cadence_path, date(2026, 5, 11),
-                        app_url="http://localhost:5051/")
-    assert text is not None
-    assert "DUE TODAY" in text
-    assert "123 W Main" in text
-    assert "jane@example.com" in text
-    assert "http://localhost:5051/" in text
+    result = build_digest(db_path, cadence_path, date(2026, 5, 11),
+                          app_url="http://localhost:5051/")
+    assert result is not None
+    body, count = result
+    assert "DUE TODAY" in body
+    assert "123 W Main" in body
+    assert "jane@example.com" in body
+    assert "http://localhost:5051/" in body
+    # One touch is due (touch 2 for jane@example.com on 2026-05-11)
+    assert count == 1
 
 
 def test_send_digest_dry_run_prints(db_path, cadence_path, capsys):
@@ -127,3 +130,19 @@ def test_send_digest_writes_sentinel_even_when_nothing_due(db_path, cadence_path
               "--last-run-path", str(sentinel)])
     assert sentinel.exists()
     assert send_mock.call_count == 0
+
+
+def test_send_digest_failure_does_not_write_sentinel(db_path, cadence_path, tmp_path):
+    """If Gmail send fails on a send-day, the sentinel must NOT be written —
+    otherwise /api/health/digest would mask the failure as a successful run."""
+    sentinel = tmp_path / "last_run.txt"
+    with patch("pipeline.due_digest.gmail_client.send_email") as send_mock:
+        send_mock.side_effect = RuntimeError("Gmail unavailable")
+        with pytest.raises(RuntimeError, match="Gmail unavailable"):
+            main(["--db", str(db_path), "--config", str(cadence_path),
+                  "--today", "2026-05-11",   # touch 2 is due
+                  "--sender", "me@example.com",
+                  "--token-path", str(tmp_path / "token.json"),
+                  "--last-run-path", str(sentinel)])
+    assert send_mock.call_count == 1
+    assert not sentinel.exists()

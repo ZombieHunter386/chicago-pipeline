@@ -15,7 +15,7 @@ import argparse
 import os
 import sqlite3
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from pipeline import cadence as cadence_module
@@ -27,9 +27,9 @@ def build_digest(
     cadence_path: Path,
     today: date,
     app_url: str,
-) -> str | None:
-    """Compute the digest body for `today`. Returns None when nothing is due
-    (caller should skip sending)."""
+) -> tuple[str, int] | None:
+    """Compute the digest body for `today`. Returns `(body, touch_count)` or
+    None when nothing is due (caller should skip sending)."""
     cadence = cadence_module.load_cadence_config(cadence_path)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -51,10 +51,12 @@ def build_digest(
         "mail": "Mail",
         "end_of_sequence": "End of sequence",
     }
+    touch_count = 0
     for g in groups:
         title = channel_titles.get(g["channel"], g["channel"])
         lines.append(f"{title} ({g['count']}):")
         for it in g["items"]:
+            touch_count += 1
             if g["channel"] == "end_of_sequence":
                 lines.append(
                     f"  • {it['address']} — sent last touch "
@@ -90,7 +92,7 @@ def build_digest(
     )
     lines.append("")
     lines.append(f"Open the app: {app_url}")
-    return "\n".join(lines)
+    return "\n".join(lines), touch_count
 
 
 def send_digest(
@@ -98,12 +100,12 @@ def send_digest(
     *,
     sender: str,
     token_path: Path,
-    today: date,
+    count: int,
 ) -> dict:
     """Send the digest via Gmail. `to` is the same as `sender` (you mail
-    yourself)."""
-    bullets = body.count("\n  • ")
-    subject = f"Chicago pipeline — {bullets} touches due today"
+    yourself). `count` is the number of touches surfaced in the body, used
+    for the subject line."""
+    subject = f"Chicago pipeline — {count} touches due today"
     return gmail_client.send_email(
         token_path=token_path,
         sender=sender,
@@ -119,7 +121,6 @@ DEFAULT_LAST_RUN_PATH = Path("data/due_digest_last_run.txt")
 def write_last_run_sentinel(path: Path) -> None:
     """Write the current timestamp to the last-run sentinel file. The UI
     reads this via /api/health/digest to surface stale-cron warnings."""
-    from datetime import datetime, timezone
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
 
@@ -145,17 +146,17 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     today = date.fromisoformat(args.today) if args.today else date.today()
-    body = build_digest(args.db, args.config, today, args.app_url)
-    # Always update the last-run sentinel — even for "nothing due" runs. The
-    # UI uses this to detect a stalled cron (e.g., Mac off for days). If we
-    # only wrote it on send-days, "nothing due" days would look like
-    # missed runs.
-    if not args.dry_run:
-        write_last_run_sentinel(args.last_run_path)
-    if body is None:
+    digest = build_digest(args.db, args.config, today, args.app_url)
+    # Nothing due: this is a successful run with no work to do. Update the
+    # sentinel so empty days don't look like missed cron runs to the UI's
+    # /api/health/digest check.
+    if digest is None:
+        if not args.dry_run:
+            write_last_run_sentinel(args.last_run_path)
         if args.dry_run:
             print(f"# Nothing due on {today.isoformat()}; would not send.")
         return 0
+    body, count = digest
     if args.dry_run:
         print(body)
         return 0
@@ -163,7 +164,11 @@ def main(argv: list[str] | None = None) -> int:
         print("ERROR: --sender (or GMAIL_SENDER_ADDRESS env var) is required",
               file=sys.stderr)
         return 2
-    send_digest(body, sender=args.sender, token_path=args.token_path, today=today)
+    # Send first, then write the sentinel. If Gmail raises, the sentinel
+    # stays stale and /api/health/digest will flag the failure instead of
+    # masking it as a successful run.
+    send_digest(body, sender=args.sender, token_path=args.token_path, count=count)
+    write_last_run_sentinel(args.last_run_path)
     return 0
 
 
