@@ -262,7 +262,7 @@ git commit -m "feat(cadence): cadence YAML + 6 new touch templates"
 
 ---
 
-## Task 2: Schema additions — pause flag + partial unique index
+## Task 2: Schema additions — pause flag + gmail_message_id column + partial unique index
 
 **Files:**
 - Modify: `chicago-pipeline/pipeline/db.py`
@@ -270,7 +270,7 @@ git commit -m "feat(cadence): cadence YAML + 6 new touch templates"
 
 - [ ] **Step 1: Write failing tests**
 
-Open `tests/test_db.py` and append two tests at the end:
+Open `tests/test_db.py` and append three tests at the end:
 
 ```python
 def test_init_db_creates_outreach_paused_column(tmp_path):
@@ -283,6 +283,19 @@ def test_init_db_creates_outreach_paused_column(tmp_path):
     conn = sqlite3.connect(p)
     cols = {row[1] for row in conn.execute("PRAGMA table_info(parcels)")}
     assert "outreach_paused" in cols
+    conn.close()
+
+
+def test_init_db_creates_outreach_gmail_message_id_column(tmp_path):
+    """init_db should add a gmail_message_id column to outreach. Replaces
+    the prior 'shove it into notes' hack — clean column with one purpose."""
+    from pipeline.db import init_db
+    import sqlite3
+    p = tmp_path / "t.db"
+    init_db(p)
+    conn = sqlite3.connect(p)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(outreach)")}
+    assert "gmail_message_id" in cols
     conn.close()
 
 
@@ -322,19 +335,32 @@ def test_init_db_creates_outreach_unique_touch_index(tmp_path):
     conn.close()
 ```
 
-Run: `.venv/bin/python -m pytest tests/test_db.py::test_init_db_creates_outreach_paused_column tests/test_db.py::test_init_db_creates_outreach_unique_touch_index -v`
+Run: `.venv/bin/python -m pytest tests/test_db.py -k "outreach_paused or gmail_message_id or outreach_unique" -v`
 
-Expected: both FAIL (column + index don't exist yet).
+Expected: all three FAIL (column + column + index don't exist yet).
 
-- [ ] **Step 2: Add the pause column to `_LATER_COLUMNS`**
+- [ ] **Step 2: Add the pause column AND the gmail_message_id column to `_LATER_COLUMNS`**
 
-In `pipeline/db.py`, find the `_LATER_COLUMNS` dict and append to the `"parcels"` tuple. Just before the closing `)` of the parcels tuple, add:
+In `pipeline/db.py`, find the `_LATER_COLUMNS` dict. Append to the `"parcels"` tuple — just before the closing `)` of the parcels tuple — add:
 
 ```python
         # outreach_paused=1 stops the cadence engine from surfacing this parcel
         # in Due Today. Manually toggled via POST /api/parcels/<pin>/pause.
         ("outreach_paused", "INTEGER DEFAULT 0"),
 ```
+
+Then add a new top-level entry for the `outreach` table after the existing entries:
+
+```python
+    # Gmail message id from successful sends; null for manual touches.
+    # Replaces the prior "shove it into notes" hack — clean column, one
+    # purpose, easy to query.
+    "outreach": (
+        ("gmail_message_id", "TEXT"),
+    ),
+```
+
+(Place this between the `"parcels"` block and the `"consolidation_groups"` block, or anywhere within `_LATER_COLUMNS` — order doesn't matter.)
 
 - [ ] **Step 3: Add the partial unique index to init_db**
 
@@ -374,13 +400,13 @@ The block now ends:
 .venv/bin/python -m pytest -q
 ```
 
-Expected: 278 passed (276 + 2 new).
+Expected: 279 passed (276 + 3 new).
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add pipeline/db.py tests/test_db.py
-git commit -m "feat(cadence): pause flag + partial unique index on outreach(pin, touch)"
+git commit -m "feat(cadence): pause flag, gmail_message_id col, partial unique index"
 ```
 
 ---
@@ -1176,19 +1202,22 @@ git commit -m "feat(cadence): validate_next_due_touch helper for route-level sen
 - Modify: `chicago-pipeline/webapp/routes.py`
 - Create: `chicago-pipeline/tests/test_webapp_cadence_routes.py`
 
-- [ ] **Step 1: Wire OUTREACH_CADENCE_PATH into the app factory**
+- [ ] **Step 1: Wire OUTREACH_CADENCE_PATH and CLOCK into the app factory**
 
-In `webapp/app.py`, inside `create_app`, add a new config key alongside the existing outreach config keys. After the line `app.config["OUTREACH_TEMPLATES_PATH"] = ...`, add:
+In `webapp/app.py`, inside `create_app`, add new config keys alongside the existing outreach config. After the line `app.config["OUTREACH_TEMPLATES_PATH"] = ...`, add:
 
 ```python
     app.config["OUTREACH_CADENCE_PATH"] = outreach_cadence_path or (
         Path(__file__).resolve().parent.parent / "config" / "outreach_cadence.yaml"
     )
+    # Clock dependency: production code calls app.config["CLOCK"]() to get
+    # today's date. Tests override this to pin a specific date — no URL
+    # parameter needed, no production "?today=" surface.
+    from datetime import date as _date
+    app.config["CLOCK"] = clock or _date.today
 ```
 
-And add `outreach_cadence_path: Path | None = None` to the `create_app` signature (after `outreach_templates_path`).
-
-The signature now looks like:
+And add two new params to the `create_app` signature (after `outreach_templates_path`):
 
 ```python
 def create_app(
@@ -1197,11 +1226,14 @@ def create_app(
     scoring_yaml_path: Path | None = None,
     outreach_templates_path: Path | None = None,
     outreach_cadence_path: Path | None = None,
+    clock: "Callable[[], date] | None" = None,
     gmail_client_secrets_path: Path | None = None,
     gmail_token_path: Path | None = None,
     gmail_sender_address: str | None = None,
 ) -> Flask:
 ```
+
+Add `from datetime import date` and `from typing import Callable` to the imports at the top of `app.py` if not already present (the quoted annotation avoids requiring an import for the type hint to be valid).
 
 - [ ] **Step 2: Write failing route tests**
 
@@ -1278,10 +1310,12 @@ def templates_path(tmp_path):
 
 @pytest.fixture
 def app_on(db_path, cadence_path, templates_path, tmp_path):
+    from datetime import date
     return create_app(
         db_path=db_path, feature_outreach=True,
         outreach_templates_path=templates_path,
         outreach_cadence_path=cadence_path,
+        clock=lambda: date(2026, 5, 11),  # pinned for deterministic tests
         gmail_client_secrets_path=tmp_path / "client.json",
         gmail_token_path=tmp_path / "token.json",
         gmail_sender_address="me@example.com",
@@ -1297,17 +1331,10 @@ def test_get_due_404_when_flag_off(app_off):
     assert app_off.test_client().get("/api/outreach/due").status_code == 404
 
 
-def test_get_due_groups_by_channel(app_on, monkeypatch):
-    """With one parcel that has touch 1 sent on 2026-05-08, touch 2 is due
-    on 2026-05-11."""
-    # Force 'today' for the route's date.today() call
-    import pipeline.cadence as cadence_mod
-    from datetime import date
-    monkeypatch.setattr(cadence_mod, "_TODAY_OVERRIDE", date(2026, 5, 11),
-                        raising=False)
-    # The route reads date.today() directly — override via the route's
-    # _today helper which respects an env var. Simpler: set the request param.
-    resp = app_on.test_client().get("/api/outreach/due?today=2026-05-11")
+def test_get_due_groups_by_channel(app_on):
+    """With one parcel that has touch 1 sent on 2026-05-08 and the test
+    clock pinned to 2026-05-11, touch 2 is due today."""
+    resp = app_on.test_client().get("/api/outreach/due")
     assert resp.status_code == 200
     data = resp.get_json()
     assert data["today"] == "2026-05-11"
@@ -1349,17 +1376,10 @@ from pipeline import cadence as cadence_module
 Then add a helper function inside the `register` function (near `_now_iso`):
 
 ```python
-        def _request_today():
-            """Returns today's date. Supports ?today=YYYY-MM-DD override for
-            tests; production uses real date.today()."""
-            from datetime import date
-            override = request.args.get("today")
-            if override:
-                try:
-                    return date.fromisoformat(override)
-                except ValueError:
-                    pass
-            return date.today()
+        def _today():
+            """Returns the current date via the injected clock. Tests
+            override app.config["CLOCK"] to a fixed lambda."""
+            return app.config["CLOCK"]()
 
         def _load_cadence():
             return cadence_module.load_cadence_config(
@@ -1373,10 +1393,9 @@ Now add the two routes (immediately after the save-template route or wherever co
         @app.get("/api/outreach/due")
         def api_outreach_due():
             cadence = _load_cadence()
-            today = _request_today()
             with closing(_conn()) as conn:
                 return jsonify(
-                    cadence_module.all_due_touches(conn, cadence, today)
+                    cadence_module.all_due_touches(conn, cadence, _today())
                 )
 
         @app.get("/api/cadence/config")
@@ -1391,7 +1410,7 @@ Now add the two routes (immediately after the save-template route or wherever co
 .venv/bin/python -m pytest -q
 ```
 
-Expected: 4 cadence route tests pass; full suite 300 + 4 = 304.
+Expected: 4 cadence route tests pass; full suite 301 + 4 = 305 (+1 from the T2 gmail_message_id test).
 
 - [ ] **Step 5: Commit**
 
@@ -1430,7 +1449,7 @@ def test_log_manual_touch_records_phone_touch(app_on, db_path):
     conn.close()
 
     resp = app_on.test_client().post(
-        "/api/outreach/log-manual-touch?today=2026-05-15",
+        "/api/outreach/log-manual-touch",
         json={"pin": "14210010010000", "touch_number": 3,
               "channel": "phone", "notes": "Left voicemail at 2pm."},
     )
@@ -1502,6 +1521,35 @@ def test_log_manual_touch_404_when_flag_off(app_off):
     ).status_code == 404
 
 
+def test_log_manual_touch_accepts_skipped_channel(app_on, db_path):
+    """Logging touch 3 with channel='skipped' records the touch as done
+    without doing anything. The next touch surfaces normally."""
+    # Send touch 2 first to make touch 3 valid
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "INSERT INTO outreach (pin, touch_number, channel, sent_date) "
+        "VALUES (?, ?, ?, ?)",
+        ("14210010010000", 2, "email", "2026-05-11T09:00:00Z"),
+    )
+    conn.commit()
+    conn.close()
+    resp = app_on.test_client().post(
+        "/api/outreach/log-manual-touch",
+        json={"pin": "14210010010000", "touch_number": 3,
+              "channel": "skipped", "notes": "Don't want to call."},
+    )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    # Verify the row was inserted with channel='skipped'
+    conn = sqlite3.connect(db_path)
+    row = conn.execute(
+        "SELECT channel, touch_number FROM outreach "
+        "WHERE outreach_id = ?", (resp.get_json()["outreach_id"],),
+    ).fetchone()
+    conn.close()
+    assert row[0] == "skipped"
+    assert row[1] == 3
+
+
 def test_pause_parcel_sets_flag(app_on, db_path):
     resp = app_on.test_client().post(
         "/api/parcels/14210010010000/pause",
@@ -1523,8 +1571,8 @@ def test_pause_parcel_hides_from_due(app_on, db_path):
     app_on.test_client().post(
         "/api/parcels/14210010010000/pause", json={"paused": True}
     )
-    # Now it shouldn't appear in due
-    resp = app_on.test_client().get("/api/outreach/due?today=2026-05-11")
+    # Now it shouldn't appear in due (test clock pinned to 2026-05-11)
+    resp = app_on.test_client().get("/api/outreach/due")
     assert resp.get_json()["groups"] == []
 
 
@@ -1554,8 +1602,8 @@ In `webapp/routes.py`, inside the same `if app.config["FEATURE_OUTREACH"]:` bloc
                 abort(400, "invalid pin")
             if not isinstance(touch_number, int):
                 abort(400, "touch_number must be an integer")
-            if channel not in ("phone", "mail"):
-                abort(400, "channel must be 'phone' or 'mail'")
+            if channel not in ("phone", "mail", "skipped"):
+                abort(400, "channel must be 'phone', 'mail', or 'skipped'")
 
             cadence = _load_cadence()
             tpl = next(
@@ -1564,7 +1612,9 @@ In `webapp/routes.py`, inside the same `if app.config["FEATURE_OUTREACH"]:` bloc
             )
             if tpl is None:
                 abort(400, f"unknown touch_number {touch_number}")
-            if tpl["channel"] != channel:
+            # 'skipped' is always allowed regardless of the cadence's configured
+            # channel for this touch — the user chose not to do it.
+            if channel != "skipped" and tpl["channel"] != channel:
                 abort(
                     400,
                     f"touch {touch_number} channel is "
@@ -1614,7 +1664,7 @@ In `webapp/routes.py`, inside the same `if app.config["FEATURE_OUTREACH"]:` bloc
                     outreach_rows=outreach_rows,
                     contact=contact,
                     parcel_mail_address=parcel_row["mail_address"],
-                    today=_request_today(),
+                    today=_today(),
                 )
                 next_touch = due[0] if due else None
 
@@ -1645,7 +1695,7 @@ You also need to import `sqlite3` at the top of `routes.py` (it's already there)
 .venv/bin/python -m pytest -q
 ```
 
-Expected: 11 cadence route tests pass; full suite 304 + 7 = 311.
+Expected: 12 cadence route tests pass (7 prior + 8 new — adds the skip test); full suite 305 + 8 = 313.
 
 - [ ] **Step 4: Commit**
 
@@ -1747,9 +1797,7 @@ def test_get_parcel_outreach_includes_sequence_block(app_on, outreach_db_path):
     )
     conn.commit()
     conn.close()
-    resp = app_on.test_client().get(
-        "/api/parcels/14210010010000/outreach?today=2026-05-11"
-    )
+    resp = app_on.test_client().get("/api/parcels/14210010010000/outreach")
     assert resp.status_code == 200
     data = resp.get_json()
     assert "sequence" in data
@@ -1800,10 +1848,12 @@ end_of_sequence_grace_days: 0
 @pytest.fixture
 def app_on(outreach_db_path: Path, templates_path: Path,
            cadence_path_in_outreach_tests: Path, tmp_path: Path):
+    from datetime import date
     return create_app(
         db_path=outreach_db_path, feature_outreach=True,
         outreach_templates_path=templates_path,
         outreach_cadence_path=cadence_path_in_outreach_tests,
+        clock=lambda: date(2026, 5, 11),  # pinned for deterministic tests
         gmail_client_secrets_path=tmp_path / "client.json",
         gmail_token_path=tmp_path / "token.json",
         gmail_sender_address="me@example.com",
@@ -1889,6 +1939,29 @@ And handle the unique-index race: wrap the `create_outreach_record` call in a tr
                     abort(409, "touch already completed (race detected)")
 ```
 
+Then find the existing line that stores the Gmail message id in the notes field — currently:
+
+```python
+                # Persist the Gmail message id in `notes` (cheap; avoids a
+                # schema change to add a dedicated column).
+                conn.execute(
+                    "UPDATE outreach SET notes = ? WHERE outreach_id = ?",
+                    (f"gmail_message_id={result.get('id','')}", oid),
+                )
+```
+
+Replace with the new dedicated column (added in T2):
+
+```python
+                # Persist the Gmail message id in its dedicated column.
+                conn.execute(
+                    "UPDATE outreach SET gmail_message_id = ? WHERE outreach_id = ?",
+                    (result.get("id", ""), oid),
+                )
+```
+
+(Removes the prior `notes` double-purpose; `notes` is now exclusively for manual touch notes.)
+
 - [ ] **Step 4: Modify api_parcel_outreach to include the sequence block**
 
 In `webapp/routes.py`, find `api_parcel_outreach`. After the existing query/contact/outreach lookups but before the `return jsonify(...)`, build a sequence block:
@@ -1906,7 +1979,7 @@ In `webapp/routes.py`, find `api_parcel_outreach`. After the existing query/cont
 
             # Compute sequence state
             cadence = _load_cadence()
-            today = _request_today()
+            today = _today()
             by_touch = {
                 r["touch_number"]: r for r in outreach_dicts
                 if r.get("touch_number") is not None
@@ -1966,7 +2039,7 @@ In `webapp/routes.py`, find `api_parcel_outreach`. After the existing query/cont
 .venv/bin/python -m pytest -q
 ```
 
-Expected: 5 new outreach route tests pass; full suite 311 + 5 = 316.
+Expected: 5 new outreach route tests pass; full suite 313 + 5 = 318.
 
 - [ ] **Step 6: Commit**
 
@@ -2661,6 +2734,7 @@ Add these new functions inside the IIFE, near `openComposeModal`:
         <div class="outreach-modal-foot">
           <span class="outreach-modal-error" id="manual-error"></span>
           <button type="button" class="btn" id="manual-copy-btn">Copy to clipboard</button>
+          <button type="button" class="btn" id="manual-skip-btn" title="Mark this touch as skipped, no action taken">Skip touch</button>
           <button type="button" class="btn btn-primary" id="manual-complete-btn">Mark complete</button>
         </div>
       </div>
@@ -2684,25 +2758,32 @@ Add these new functions inside the IIFE, near `openComposeModal`:
     });
 
     const completeBtn = root.querySelector('#manual-complete-btn');
+    const skipBtn = root.querySelector('#manual-skip-btn');
     const errSpan = root.querySelector('#manual-error');
-    completeBtn.addEventListener('click', async () => {
+
+    async function submit(actualChannel, successLabel) {
       const notes = root.querySelector('#manual-notes').value;
       errSpan.textContent = '';
-      completeBtn.disabled = true; completeBtn.textContent = 'Saving…';
+      completeBtn.disabled = true; skipBtn.disabled = true;
       try {
         await logManualTouch({
           pin: parcel.pin, touch_number: touchNumber,
-          channel, notes,
+          channel: actualChannel, notes,
         });
         onClose();
-        showToast(`Touch ${touchNumber} logged`, 'success');
+        showToast(successLabel, 'success');
         window.dispatchEvent(new CustomEvent('outreach:refresh',
                                               { detail: { pin: parcel.pin } }));
       } catch (e) {
         errSpan.textContent = e.message || 'save failed';
-        completeBtn.disabled = false; completeBtn.textContent = 'Mark complete';
+        completeBtn.disabled = false; skipBtn.disabled = false;
       }
-    });
+    }
+
+    completeBtn.addEventListener('click',
+      () => submit(channel, `Touch ${touchNumber} logged`));
+    skipBtn.addEventListener('click',
+      () => submit('skipped', `Touch ${touchNumber} skipped`));
   }
 
   async function openPhoneModal(parcel, contact, touchNumber) {
@@ -2902,7 +2983,40 @@ def test_send_digest_skips_send_when_empty(db_path, cadence_path, tmp_path):
         main(["--db", str(db_path), "--config", str(cadence_path),
               "--today", "2026-05-09",
               "--sender", "me@example.com",
-              "--token-path", str(tmp_path / "token.json")])
+              "--token-path", str(tmp_path / "token.json"),
+              "--last-run-path", str(tmp_path / "last_run.txt")])
+    assert send_mock.call_count == 0
+
+
+def test_send_digest_writes_last_run_sentinel(db_path, cadence_path, tmp_path):
+    """Every non-dry-run invocation touches the sentinel — observability
+    for 'did the cron fire today?'"""
+    sentinel = tmp_path / "last_run.txt"
+    with patch("pipeline.due_digest.gmail_client.send_email") as send_mock:
+        send_mock.return_value = {"id": "m", "threadId": "t"}
+        main(["--db", str(db_path), "--config", str(cadence_path),
+              "--today", "2026-05-11",
+              "--sender", "me@example.com",
+              "--token-path", str(tmp_path / "token.json"),
+              "--last-run-path", str(sentinel)])
+    assert sentinel.exists()
+    content = sentinel.read_text()
+    # Should be an ISO-8601 UTC timestamp
+    assert content.startswith("20")
+    assert content.endswith("Z")
+
+
+def test_send_digest_writes_sentinel_even_when_nothing_due(db_path, cadence_path, tmp_path):
+    """Sentinel must update on empty-day runs too, otherwise empty days
+    look like missed runs."""
+    sentinel = tmp_path / "last_run.txt"
+    with patch("pipeline.due_digest.gmail_client.send_email") as send_mock:
+        main(["--db", str(db_path), "--config", str(cadence_path),
+              "--today", "2026-05-09",   # nothing due
+              "--sender", "me@example.com",
+              "--token-path", str(tmp_path / "token.json"),
+              "--last-run-path", str(sentinel)])
+    assert sentinel.exists()
     assert send_mock.call_count == 0
 ```
 
@@ -3038,6 +3152,17 @@ def send_digest(
     )
 
 
+DEFAULT_LAST_RUN_PATH = Path("data/due_digest_last_run.txt")
+
+
+def write_last_run_sentinel(path: Path) -> None:
+    """Write the current timestamp to the last-run sentinel file. The UI
+    reads this via /api/health/digest to surface stale-cron warnings."""
+    from datetime import datetime, timezone
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Send the Due Today digest email")
     parser.add_argument("--db", type=Path,
@@ -3052,12 +3177,20 @@ def main(argv: list[str] | None = None) -> int:
                         help="Gmail address to send from (and receive at)")
     parser.add_argument("--token-path", type=Path,
                         default=Path(os.environ.get("GMAIL_TOKEN_PATH", "data/gmail_token.json")))
+    parser.add_argument("--last-run-path", type=Path, default=DEFAULT_LAST_RUN_PATH,
+                        help="File the digest touches on every run for observability")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print the digest to stdout instead of sending")
     args = parser.parse_args(argv)
 
     today = date.fromisoformat(args.today) if args.today else date.today()
     body = build_digest(args.db, args.config, today, args.app_url)
+    # Always update the last-run sentinel — even for "nothing due" runs. The
+    # UI uses this to detect a stalled cron (e.g., Mac off for days). If we
+    # only wrote it on send-days, "nothing due" days would look like
+    # missed runs.
+    if not args.dry_run:
+        write_last_run_sentinel(args.last_run_path)
     if body is None:
         if args.dry_run:
             print(f"# Nothing due on {today.isoformat()}; would not send.")
@@ -3084,7 +3217,7 @@ if __name__ == "__main__":
 .venv/bin/python -m pytest -q
 ```
 
-Expected: 5 digest tests pass; full suite 316 + 5 = 321.
+Expected: 7 digest tests pass (5 prior + 2 sentinel tests); full suite 318 + 7 = 325.
 
 - [ ] **Step 4: Commit**
 
@@ -3095,11 +3228,18 @@ git commit -m "feat(cadence): daily Due Today digest CLI (pipeline.due_digest)"
 
 ---
 
-## Task 13: Launchd installer + README docs
+## Task 13: Launchd installer + backup script + observability endpoint + README
 
 **Files:**
 - Create: `chicago-pipeline/scripts/install_due_digest_launchd.sh`
 - Create: `chicago-pipeline/scripts/com.chicagopipeline.duedigest.plist.template`
+- Create: `chicago-pipeline/scripts/backup_outreach.sh`
+- Modify: `chicago-pipeline/webapp/routes.py` (add `/api/health/digest`)
+- Modify: `chicago-pipeline/webapp/app.py` (add `DUE_DIGEST_LAST_RUN_PATH` config key)
+- Modify: `chicago-pipeline/webapp/static/js/outreach.js` (surface last-run timestamp)
+- Modify: `chicago-pipeline/webapp/static/css/style.css` (style the warning)
+- Modify: `chicago-pipeline/tests/test_webapp_cadence_routes.py` (test the new endpoint)
+- Modify: `chicago-pipeline/.gitignore` (ignore the new sentinel + log files)
 - Modify: `chicago-pipeline/README.md`
 
 - [ ] **Step 1: Create the launchd plist template**
@@ -3200,7 +3340,224 @@ cd /Users/hunterheyman/Claude/chicago-pipeline
 chmod +x scripts/install_due_digest_launchd.sh
 ```
 
-- [ ] **Step 3: Update README.md with the cadence section**
+- [ ] **Step 3: Create the backup script**
+
+Create `chicago-pipeline/scripts/backup_outreach.sh`:
+
+```bash
+#!/usr/bin/env bash
+# Dumps just the outreach/contacts/waves tables from the working DB into
+# a timestamped backup file under data/. Run manually before any risky
+# operation, or wire to launchd for daily backups.
+set -euo pipefail
+
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SRC="${1:-$PROJECT_DIR/data/full.alt.db}"
+TIMESTAMP="$(date +%Y-%m-%d-%H%M%S)"
+DEST="$PROJECT_DIR/data/outreach_backup_${TIMESTAMP}.sql"
+
+if [ ! -f "$SRC" ]; then
+    echo "ERROR: source DB not found: $SRC" >&2
+    exit 1
+fi
+
+# Dump only the outreach-related tables. SQL text file is human-readable
+# and small (~few KB at 10-20/wk volume). To restore: sqlite3 <new.db>
+# < $DEST after init_db creates the schema.
+sqlite3 "$SRC" \
+    ".dump outreach" \
+    ".dump contacts" \
+    ".dump waves" \
+    > "$DEST"
+
+# Keep only the last 30 daily backups — older than that gets pruned.
+find "$PROJECT_DIR/data" -name 'outreach_backup_*.sql' -type f \
+    | sort -r | tail -n +31 | xargs -I {} rm -f {}
+
+echo "Backup written: $DEST"
+echo "Restore with: sqlite3 <new.db> < $DEST  (after init_db creates the schema)"
+```
+
+Make it executable:
+
+```bash
+chmod +x scripts/backup_outreach.sh
+```
+
+Test it:
+
+```bash
+./scripts/backup_outreach.sh
+ls -la data/outreach_backup_*.sql | head -3
+```
+
+Expected: at least one `.sql` backup file in `data/`.
+
+Optionally wire to launchd as a sibling job (8:55am daily, 5 min before the digest). Create `scripts/com.chicagopipeline.backup.plist.template` if you want automated daily backups, or just run the script manually before any risky operation.
+
+- [ ] **Step 4: Add the observability endpoint `/api/health/digest`**
+
+Open `webapp/app.py` and add a new config key alongside the existing outreach paths. After `app.config["GMAIL_TOKEN_PATH"] = ...`, add:
+
+```python
+    app.config["DUE_DIGEST_LAST_RUN_PATH"] = due_digest_last_run_path or Path(
+        "data/due_digest_last_run.txt"
+    )
+```
+
+Add the param to `create_app`'s signature alongside the other Path params:
+
+```python
+    due_digest_last_run_path: Path | None = None,
+```
+
+Open `webapp/routes.py` and add a new route inside the existing `if app.config["FEATURE_OUTREACH"]:` block (next to `/api/cadence/config`):
+
+```python
+        @app.get("/api/health/digest")
+        def api_health_digest():
+            """Returns the last-known-good timestamp of the daily digest
+            cron + a stale flag. Used by the UI to warn when the digest
+            hasn't fired (Mac was off, cron is broken, etc.)."""
+            from datetime import datetime, timedelta, timezone
+            p = Path(app.config["DUE_DIGEST_LAST_RUN_PATH"])
+            if not p.exists():
+                return jsonify({"last_run": None, "stale": True,
+                                "reason": "no sentinel file yet"})
+            try:
+                ts_text = p.read_text().strip()
+                ts = datetime.fromisoformat(ts_text.replace("Z", "+00:00"))
+            except (ValueError, OSError):
+                return jsonify({"last_run": None, "stale": True,
+                                "reason": "unparseable sentinel"})
+            stale = (datetime.now(timezone.utc) - ts) > timedelta(hours=25)
+            return jsonify({"last_run": ts_text, "stale": stale})
+```
+
+Add a test in `tests/test_webapp_cadence_routes.py`:
+
+```python
+def test_health_digest_no_sentinel_means_stale(app_on):
+    resp = app_on.test_client().get("/api/health/digest")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["stale"] is True
+    assert data["last_run"] is None
+
+
+def test_health_digest_recent_sentinel_not_stale(app_on, tmp_path):
+    from datetime import datetime, timezone
+    sentinel = Path(app_on.config["DUE_DIGEST_LAST_RUN_PATH"])
+    sentinel.parent.mkdir(parents=True, exist_ok=True)
+    sentinel.write_text(datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    resp = app_on.test_client().get("/api/health/digest")
+    data = resp.get_json()
+    assert data["stale"] is False
+    assert data["last_run"] is not None
+
+
+def test_health_digest_old_sentinel_is_stale(app_on, tmp_path):
+    sentinel = Path(app_on.config["DUE_DIGEST_LAST_RUN_PATH"])
+    sentinel.parent.mkdir(parents=True, exist_ok=True)
+    # 2 days old
+    sentinel.write_text("2026-05-13T09:00:00Z")
+    resp = app_on.test_client().get("/api/health/digest")
+    data = resp.get_json()
+    assert data["stale"] is True
+```
+
+The test `app_on` fixture should be updated to pass `due_digest_last_run_path=tmp_path / "last_run.txt"` so tests don't trample on real data — find the existing `app_on` fixture in `test_webapp_cadence_routes.py` and add that arg:
+
+```python
+@pytest.fixture
+def app_on(db_path, cadence_path, templates_path, tmp_path):
+    from datetime import date
+    return create_app(
+        db_path=db_path, feature_outreach=True,
+        outreach_templates_path=templates_path,
+        outreach_cadence_path=cadence_path,
+        due_digest_last_run_path=tmp_path / "last_run.txt",
+        clock=lambda: date(2026, 5, 11),
+        gmail_client_secrets_path=tmp_path / "client.json",
+        gmail_token_path=tmp_path / "token.json",
+        gmail_sender_address="me@example.com",
+    )
+```
+
+Run the tests:
+
+```bash
+.venv/bin/python -m pytest tests/test_webapp_cadence_routes.py -v
+```
+
+Expected: 12 prior + 3 new = 15 cadence-route tests pass.
+
+- [ ] **Step 5: Surface the last-run timestamp in the UI**
+
+In `webapp/static/js/outreach.js`, near `renderDueToday`, add a function that fetches digest health and prepends a warning to the Due Today bar when stale:
+
+```javascript
+  async function fetchDigestHealth() {
+    const resp = await fetch('/api/health/digest');
+    if (!resp.ok) return null;
+    return resp.json();
+  }
+
+  async function renderDigestHealthBadge() {
+    const bar = document.getElementById('due-today-bar');
+    if (!bar) return;
+    let health;
+    try { health = await fetchDigestHealth(); } catch (_) { return; }
+    if (!health) return;
+    // Remove existing badge if present
+    const existing = bar.querySelector('.digest-health-badge');
+    if (existing) existing.remove();
+    if (!health.stale) return;  // healthy → no badge
+    const badge = document.createElement('span');
+    badge.className = 'digest-health-badge';
+    badge.title = health.last_run
+      ? `Last digest run: ${health.last_run}`
+      : 'Digest has never run';
+    badge.textContent = health.last_run
+      ? '⚠ Digest stale'
+      : '⚠ Digest not running';
+    bar.appendChild(badge);
+    // Show the bar even if Due Today is empty when the digest is unhealthy
+    bar.hidden = false;
+  }
+
+  window.addEventListener('DOMContentLoaded', () => { renderDigestHealthBadge(); });
+  window.addEventListener('outreach:refresh', () => { renderDigestHealthBadge(); });
+```
+
+Add the CSS to `webapp/static/css/style.css`:
+
+```css
+.digest-health-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: #58220e;
+  color: #ffd2a8;
+  font-size: 11px;
+  margin-left: auto;
+  cursor: help;
+}
+```
+
+- [ ] **Step 6: Add the new artifacts to `.gitignore`**
+
+Append to `.gitignore`:
+
+```
+# Cadence runtime artifacts — local-only
+data/due_digest.log
+data/due_digest_last_run.txt
+data/outreach_backup_*.sql
+```
+
+- [ ] **Step 7: Update README.md with the cadence section**
 
 In `README.md`, append at the very end:
 
@@ -3246,24 +3603,48 @@ Edit `config/outreach_cadence.yaml` directly. Changes take effect on the next pa
 ### Editing touch templates
 
 The compose modal's Save template button writes back to `config/outreach_templates.yaml`. Six new templates ship as drafts; the cold-intro (touch 1) is the previously-shipped version. Edit content directly in the file or via the UI.
+
+### Skipping a touch
+
+If a touch's `requires` field isn't satisfied (e.g., no phone for touch 3), the cadence engine silently skips it — it never surfaces in Due Today. If you have the contact info but choose not to use a channel (e.g., have the phone but don't want to call), open the touch via Compose and click **Skip touch** in the modal. The touch is logged with channel = `skipped` and the cadence advances to the next available touch.
+
+### Backups
+
+Outreach state lives in your local SQLite file (`data/full.alt.db`). Run a backup before any risky operation:
+
+```bash
+./scripts/backup_outreach.sh
 ```
 
-- [ ] **Step 4: Run pytest + sanity check**
+This dumps just the `outreach`, `contacts`, and `waves` tables to a timestamped `.sql` file under `data/`. The last 30 daily backups are kept; older ones are pruned.
+
+### Digest observability
+
+The daily digest writes a sentinel file (`data/due_digest_last_run.txt`) on every successful run. The UI surfaces a "⚠ Digest stale" badge in the Due Today bar when the sentinel is older than 25 hours, or absent. Check `data/due_digest.log` for the underlying error.
+```
+
+- [ ] **Step 8: Run pytest + sanity checks**
 
 ```bash
 .venv/bin/python -m pytest -q
 .venv/bin/python -m pipeline.due_digest --help | head -10
+./scripts/backup_outreach.sh
 ```
 
-Expected: 321 passed; help text prints without error.
+Expected: 328 passed (325 + 3 new health-digest tests); help text prints without error; backup script writes a `.sql` file.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add scripts/install_due_digest_launchd.sh \
         scripts/com.chicagopipeline.duedigest.plist.template \
+        scripts/backup_outreach.sh \
+        webapp/app.py webapp/routes.py \
+        webapp/static/js/outreach.js webapp/static/css/style.css \
+        tests/test_webapp_cadence_routes.py \
+        .gitignore \
         README.md
-git commit -m "feat(cadence): launchd installer + README cadence section"
+git commit -m "feat(cadence): launchd, backup script, /api/health/digest, README"
 ```
 
 ---
@@ -3311,7 +3692,7 @@ Expected:
 
 Open `http://localhost:5051/` in a browser. Verify:
 
-1. **Top bar** still renders with score version + count. No "Due Today" banner (nothing due yet — expected).
+1. **Top bar** still renders with score version + count. Due Today banner only appears if something is actually due (or a digest staleness warning fires).
 2. **Pick a parcel.** Detail panel shows: Stage, **Sequence** ("No outreach yet."), Contact, Outreach History sections. The Sequence section says "No outreach yet — Compose touch 1 to start the cadence."
 3. **Add an email** in the Contact section, click outside → "Email saved" toast.
 4. **Click "Compose email…"** — modal opens for touch 1 with the `initial-cold` template selected.
@@ -3319,12 +3700,16 @@ Open `http://localhost:5051/` in a browser. Verify:
    - Toast "Email sent"
    - Stage flips to `outreach`
    - Sequence section now shows "Touch 1 of 7" with the 1st row checked ✓ and the 2nd row marked ●
-   - Due Today banner appears at top — but only after day 3 from touch 1; for today it should be empty unless you set `--today` override
-6. **Hit `/api/outreach/due?today=2026-05-20`** (or whatever's 3+ days after your test send) — should show your parcel in the email group.
+   - Due Today banner appears at top — but only after day 3 from touch 1
+6. **Wait 3+ days OR set the clock for a one-off probe:** to verify Due Today, temporarily override the clock in a Python shell against the running app's process (or simulate by directly inserting an old `sent_date` via sqlite). The browser path is to actually wait the days, then refresh and confirm your parcel shows in the email group.
 7. **Click "Pause cadence"** — toast confirms; refresh the page; Sequence section shows the "paused" badge; Due Today banner no longer surfaces this parcel.
 8. **Click "Resume cadence"** — paused badge clears.
 9. **Send touch 2** by clicking Compose again (now defaults to touch 2 template) — verify the Sequence section updates.
-10. **Try a phone touch (touch 3) manually:** with touch 2 sent, set `?today=2026-05-22` or wait the days. Click Compose — phone modal opens, shows the script, click "Mark complete" → toast, Sequence updates.
+10. **Try a phone touch (touch 3) manually:** with touch 2 sent and 7+ days elapsed (or fake by inserting an old touch_1 sent_date), click Compose — phone modal opens, shows the script, click "Mark complete" → toast, Sequence updates.
+11. **Try Skip touch:** in the same phone modal, click "Skip touch" instead — outreach row records with channel=`skipped`, cadence advances.
+12. **Run the digest manually:** `.venv/bin/python -m pipeline.due_digest --dry-run` — prints the digest body or "Nothing due."
+13. **Verify the health endpoint:** `curl http://127.0.0.1:5051/api/health/digest` — returns `{"last_run": null, "stale": true, ...}` initially. Run `pipeline.due_digest` once for real (or use `--dry-run` after Step 5 of T12 adds the sentinel-write — confirm dry-run also touches the sentinel). Re-curl: `stale` becomes `false`.
+14. **Run the backup script:** `./scripts/backup_outreach.sh` — writes `data/outreach_backup_*.sql`. Restore-readiness can be eyeballed by `head data/outreach_backup_*.sql`.
 
 If any of those steps misbehave, screenshot and pin down which step before moving on.
 
@@ -3340,7 +3725,7 @@ pkill -f "python -m webapp" 2>/dev/null || true
 .venv/bin/python -m pytest -q
 ```
 
-Expected: 321 passed, 0 failed.
+Expected: 328 passed, 0 failed.
 
 - [ ] **Step 6: Branch summary commit (optional — empty or doc-only)**
 
@@ -3366,6 +3751,6 @@ After all 14 tasks land, run this self-check:
 
 3. **Type consistency:** `cadence_config` dict shape is identical across `load_cadence_config` return, `next_due_touches_for_parcel` arg, `is_end_of_sequence` arg, and `all_due_touches` arg. `outreach_rows` shape (list of dicts with `touch_number`, `sent_date`) is the same everywhere. `validate_next_due_touch` is the only new outreach.py export.
 
-4. **Test count math:** 276 start → +2 (T2) → +13 (T3) → +5 (T4) → +4 (T5) → +4 (T6) → +7 (T7) → +5 (T8) → +5 (T12) = 321 final.
+4. **Test count math:** 276 start → +3 (T2) → +13 (T3) → +5 (T4) → +4 (T5) → +4 (T6) → +8 (T7) → +5 (T8) → +7 (T12) → +3 (T13) = 328 final.
 
 If any check fails, add the missing task or fix the existing one inline; no need for a second review pass.
