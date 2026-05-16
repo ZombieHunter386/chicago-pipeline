@@ -1,6 +1,7 @@
 # tests/test_db.py
 import sqlite3
 from pathlib import Path
+import pytest
 from pipeline.db import init_db, get_connection, upsert_rows
 
 
@@ -211,7 +212,9 @@ def test_consolidation_groups_has_score_columns(tmp_path):
 
 def test_init_db_creates_outreach_paused_column(tmp_path):
     """init_db should add an outreach_paused column to parcels (via the
-    _LATER_COLUMNS migration). Defaults to 0."""
+    _LATER_COLUMNS migration). Defaults to 0 — the cadence query relies
+    on `WHERE outreach_paused = 0` for existing parcels, so a NULL default
+    would silently exclude them."""
     from pipeline.db import init_db
     import sqlite3
     p = tmp_path / "t.db"
@@ -219,6 +222,12 @@ def test_init_db_creates_outreach_paused_column(tmp_path):
     conn = sqlite3.connect(p)
     cols = {row[1] for row in conn.execute("PRAGMA table_info(parcels)")}
     assert "outreach_paused" in cols
+    # Verify the declared default — pragma_table_info returns the literal
+    # SQL default text, so DEFAULT 0 shows as the string "0".
+    default_val = conn.execute(
+        "SELECT dflt_value FROM pragma_table_info('parcels') WHERE name='outreach_paused'"
+    ).fetchone()[0]
+    assert default_val == "0", f"expected default 0, got {default_val!r}"
     conn.close()
 
 
@@ -251,7 +260,6 @@ def test_init_db_creates_outreach_unique_touch_index(tmp_path):
     )
     conn.commit()
     # Attempting a duplicate (same pin, same touch) must fail
-    import pytest
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute(
             "INSERT INTO outreach (pin, touch_number, sent_date) VALUES (?, ?, ?)",
