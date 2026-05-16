@@ -11,6 +11,7 @@ from werkzeug.exceptions import HTTPException
 from googleapiclient.errors import HttpError
 
 from pipeline import outreach as outreach_module, gmail_client
+from pipeline import cadence as cadence_module
 from webapp.filter_schema import build_filter_schema
 from webapp.parcel_query import (
     ALLOWED_CATEGORIES,
@@ -409,6 +410,16 @@ def register(app: Flask) -> None:
                 Path(app.config["OUTREACH_TEMPLATES_PATH"])
             )
 
+        def _today():
+            """Returns the current date via the injected clock. Tests
+            override app.config["CLOCK"] to a fixed lambda."""
+            return app.config["CLOCK"]()
+
+        def _load_cadence():
+            return cadence_module.load_cadence_config(
+                Path(app.config["OUTREACH_CADENCE_PATH"])
+            )
+
         def _parcel_or_404(conn, pin: str):
             if not pin.isdigit() or len(pin) != 14:
                 abort(404)
@@ -490,6 +501,18 @@ def register(app: Flask) -> None:
             except OSError as e:
                 abort(500, f"failed to save template: {e}")
             return jsonify({"template": saved})
+
+        @app.get("/api/outreach/due")
+        def api_outreach_due():
+            cadence = _load_cadence()
+            with closing(_conn()) as conn:
+                return jsonify(
+                    cadence_module.all_due_touches(conn, cadence, _today())
+                )
+
+        @app.get("/api/cadence/config")
+        def api_cadence_config():
+            return jsonify(_load_cadence())
 
         @app.post("/api/contacts/upsert")
         def api_contacts_upsert():

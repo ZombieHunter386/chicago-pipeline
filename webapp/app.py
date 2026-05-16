@@ -1,5 +1,7 @@
 from __future__ import annotations
+from datetime import date
 from pathlib import Path
+from typing import Callable
 from flask import Flask
 
 
@@ -8,6 +10,8 @@ def create_app(
     feature_outreach: bool = False,
     scoring_yaml_path: Path | None = None,
     outreach_templates_path: Path | None = None,
+    outreach_cadence_path: Path | None = None,
+    clock: "Callable[[], date] | None" = None,
     gmail_client_secrets_path: Path | None = None,
     gmail_token_path: Path | None = None,
     gmail_sender_address: str | None = None,
@@ -26,6 +30,14 @@ def create_app(
     app.config["OUTREACH_TEMPLATES_PATH"] = outreach_templates_path or (
         Path(__file__).resolve().parent.parent / "config" / "outreach_templates.yaml"
     )
+    app.config["OUTREACH_CADENCE_PATH"] = outreach_cadence_path or (
+        Path(__file__).resolve().parent.parent / "config" / "outreach_cadence.yaml"
+    )
+    # Clock dependency: production code calls app.config["CLOCK"]() to get
+    # today's date. Tests override this to pin a specific date — no URL
+    # parameter needed, no production "?today=" surface.
+    from datetime import date as _date
+    app.config["CLOCK"] = clock or _date.today
     app.config["GMAIL_CLIENT_SECRETS_PATH"] = gmail_client_secrets_path or Path(
         "data/gmail_oauth_client.json"
     )
