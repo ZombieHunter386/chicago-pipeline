@@ -131,7 +131,15 @@
     basemapLayers = stack.map(cfg => {
       const opts = { attribution: cfg.attribution, maxZoom: cfg.maxZoom };
       if (cfg.opacity != null) opts.opacity = cfg.opacity;
-      return L.tileLayer(cfg.url, opts).addTo(map);
+      const layer = L.tileLayer(cfg.url, opts).addTo(map);
+      // Surface tile load failures (expired/invalid API key, quota exhausted,
+      // CORS blocked) instead of silently rendering grey. The error event
+      // includes the tile coords + the underlying <img> so the URL is
+      // recoverable from devtools network panel.
+      layer.on('tileerror', (e) => {
+        console.warn('basemap tile failed', name, e.coords, e.tile && e.tile.src);
+      });
+      return layer;
     });
     basemapLayers.forEach(l => l.bringToBack());
     // Auto-toggle the OSM/Stadia address-label overlay: dark basemap (CARTO)
