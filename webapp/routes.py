@@ -83,6 +83,7 @@ def register(app: Flask) -> None:
         return render_template(
             "index.html",
             feature_outreach=current_app.config["FEATURE_OUTREACH"],
+            esri_api_key=current_app.config.get("ESRI_API_KEY", ""),
         )
 
     @app.get("/health")

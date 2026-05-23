@@ -6,6 +6,9 @@ Configuration is via env vars so the same image runs in any host:
   FEATURE_OUTREACH      (set to 'true' / '1' to enable, default off)
   WEBAPP_USER           (basic-auth username; absence disables auth)
   WEBAPP_PASSWORD       (basic-auth password; absence disables auth)
+  ESRI_API_KEY          (Esri location-services API key; satellite basemap
+                         falls back to anonymous Esri without it — which
+                         hits "Account Limit Exceeded" under deployed load)
 
 Local dev still uses `python -m webapp --db ...` (the argparse CLI in
 __main__.py). gunicorn reaches `webapp.wsgi:app` and skips that CLI."""
@@ -39,4 +42,5 @@ app = create_app(
     db_path=_db_path,
     scoring_yaml_path=_scoring_yaml_path,
     feature_outreach=_feature_outreach,
+    esri_api_key=os.environ.get("ESRI_API_KEY"),
 )

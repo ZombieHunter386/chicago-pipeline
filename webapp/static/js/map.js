@@ -10,9 +10,18 @@
     other: '#f85149',
   };
 
-  // Each basemap is a list of tile layers stacked back-to-front. The
-  // satellite stack adds an Esri Reference overlay so street names show
-  // up over the imagery — without it, satellite is unlabeled.
+  // Each basemap is a list of tile layers stacked back-to-front. With an
+  // Esri API key (window.ESRI_API_KEY, injected by the index template from
+  // the ESRI_API_KEY env var), the satellite layer uses Esri's API-keyed
+  // ibasemaps endpoint — no anonymous-quota wall. Without a key it falls
+  // back to the anonymous server.arcgisonline.com URL, which works for
+  // local hobby use but hits "Account Limit Exceeded" on deployed traffic.
+  // Stamen Toner labels (added in setBasemap when satellite is selected)
+  // overlay street/place names, so no separate reference layer is needed.
+  const esriKey = window.ESRI_API_KEY || '';
+  const satelliteUrl = esriKey
+    ? `https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}?token=${esriKey}`
+    : 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
   const BASEMAPS = {
     dark: [
       {
@@ -23,16 +32,9 @@
     ],
     satellite: [
       {
-        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+        url: satelliteUrl,
+        attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics',
         maxZoom: 19,
-      },
-      {
-        // Esri reference overlay — transparent street labels and place names.
-        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
-        attribution: 'Labels &copy; Esri',
-        maxZoom: 19,
-        opacity: 0.85,
       },
     ],
   };
