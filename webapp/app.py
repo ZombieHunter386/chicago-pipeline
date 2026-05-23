@@ -11,6 +11,7 @@ def create_app(
     gmail_client_secrets_path: Path | None = None,
     gmail_token_path: Path | None = None,
     gmail_sender_address: str | None = None,
+    esri_api_key: str | None = None,
 ) -> Flask:
     app = Flask(
         __name__,
@@ -30,6 +31,11 @@ def create_app(
     )
     app.config["GMAIL_TOKEN_PATH"] = gmail_token_path or Path("data/gmail_token.json")
     app.config["GMAIL_SENDER_ADDRESS"] = gmail_sender_address or ""
+    # Esri ibasemaps API key — opt-in. When set, the satellite basemap uses
+    # Esri's API-keyed World_Imagery endpoint (no anonymous quota wall).
+    # Without it, map.js falls back to the anonymous URL (fine for hobby
+    # local dev; hits "Account Limit Exceeded" under deployed traffic).
+    app.config["ESRI_API_KEY"] = esri_api_key or ""
 
     from webapp import routes
     routes.register(app)

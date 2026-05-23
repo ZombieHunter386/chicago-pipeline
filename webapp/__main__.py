@@ -1,10 +1,17 @@
 from __future__ import annotations
 import argparse
 from pathlib import Path
+from dotenv import load_dotenv
 from webapp.app import create_app
 
 
 def main() -> None:
+    # Load .env at the project root so local dev gets the same env vars
+    # (GMAIL_*, ESRI_API_KEY, etc.) regardless of how python is launched.
+    # Prod (webapp.wsgi via gunicorn on Railway) gets env vars from the
+    # host directly and never reaches this file.
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
     parser = argparse.ArgumentParser(description="Chicago Pipeline Review UI")
     parser.add_argument("--db", type=Path, default=Path("data/smoke.db"),
                         help="Path to SQLite database (default: data/smoke.db)")
@@ -27,6 +34,7 @@ def main() -> None:
     gmail_client = os.environ.get("GMAIL_OAUTH_CLIENT_PATH")
     gmail_token = os.environ.get("GMAIL_TOKEN_PATH")
     gmail_sender = os.environ.get("GMAIL_SENDER_ADDRESS")
+    esri_api_key = os.environ.get("ESRI_API_KEY")
 
     if args.outreach:
         # oauthlib refuses to do OAuth over plain HTTP by default; the local
@@ -42,6 +50,7 @@ def main() -> None:
         gmail_client_secrets_path=Path(gmail_client) if gmail_client else None,
         gmail_token_path=Path(gmail_token) if gmail_token else None,
         gmail_sender_address=gmail_sender,
+        esri_api_key=esri_api_key,
     )
     app.run(host="127.0.0.1", port=args.port, debug=args.debug)
 

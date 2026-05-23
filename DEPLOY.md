@@ -100,19 +100,21 @@ redownloads cost $0 even on disk wipes).
    `ZombieHunter386/chicago-pipeline`
 
 3. **Render reads `render.yaml` from the repo** and shows a preview of what
-   will be created: one web service + one persistent disk + three secret
-   env vars to fill in.
+   will be created: one web service + one persistent disk + four env vars
+   to fill in.
 
-4. **Fill in the three secrets** (Render prompts for each):
+4. **Fill in the env vars** (Render prompts for each):
 
    | Key | Value |
    |---|---|
    | `WEBAPP_USER` | (your friend's username — e.g. `David`) |
    | `WEBAPP_PASSWORD` | (your friend's password — never commit this anywhere) |
    | `DB_DOWNLOAD_URL` | the R2 public URL from Step 1.6 |
+   | `ESRI_API_KEY` | location-services API key from developers.arcgis.com (prefix `AAPT…`). Without it the satellite basemap hits "Account Limit Exceeded" under deployed traffic. Restrict the key to your Render domain in the Esri dashboard — it ships to the browser in the rendered HTML. |
 
-   These values stay in Render's encrypted secret store. They're not in the
-   repo and not in this guide for that reason.
+   The first three stay in Render's encrypted secret store. `ESRI_API_KEY`
+   is referrer-scoped at Esri so even though it lands in the browser, only
+   requests from your domain can use it.
 
 5. **Click "Apply"** to provision the service.
 

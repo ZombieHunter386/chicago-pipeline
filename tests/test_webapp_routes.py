@@ -18,6 +18,26 @@ def test_index_returns_200_and_html(client):
     assert b"Chicago Multifamily Pipeline" in resp.data
 
 
+def test_index_injects_esri_api_key_when_set(db_path):
+    # Guards the env → app.config → template → window.ESRI_API_KEY chain.
+    # Drop any link and the satellite basemap silently reverts to anonymous
+    # Esri, which hits "Account Limit Exceeded" under deployed load.
+    app = create_app(
+        db_path=db_path, feature_outreach=False, esri_api_key="AAPT-test-key"
+    )
+    app.testing = True
+    resp = app.test_client().get("/")
+    assert resp.status_code == 200
+    assert b'window.ESRI_API_KEY = "AAPT-test-key";' in resp.data
+
+
+def test_index_injects_empty_esri_api_key_when_unset(client):
+    # When no key is configured the JS-side `window.ESRI_API_KEY || ''`
+    # falls through to the anonymous Esri URL — acceptable for hobby dev.
+    resp = client.get("/")
+    assert b'window.ESRI_API_KEY = "";' in resp.data
+
+
 @pytest.fixture
 def pop_client(populated_db_path):
     app = create_app(db_path=populated_db_path, feature_outreach=False)
