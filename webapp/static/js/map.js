@@ -157,13 +157,16 @@
 
   function ensureOsmLabelsLayer() {
     if (osmLabelsLayer) return osmLabelsLayer;
-    // Stamen Toner Labels is a transparent label-only OSM tileset that
-    // shows building/street numbers at high zoom — ideal for overlaying
-    // on satellite imagery. Hosted free by Stadia Maps with attribution.
+    // Carto Dark-Matter labels-only — transparent label tileset that overlays
+    // street names + place names on satellite imagery. Was previously Stamen
+    // Toner via Stadia Maps, but Stadia tightened anonymous-use rate limits
+    // in 2024 (429s every page load). Carto's free CDN handles non-commercial
+    // hobby volume without a key. Uses {s} subdomain rotation across a-d.
     osmLabelsLayer = L.tileLayer(
-      'https://tiles.stadiamaps.com/tiles/stamen_toner_labels/{z}/{x}/{y}{r}.png',
+      'https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png',
       {
-        attribution: '&copy; Stadia Maps &copy; Stamen Design &copy; OpenStreetMap',
+        attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+        subdomains: 'abcd',
         maxZoom: 19,
         opacity: 0.95,
       }
