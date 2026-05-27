@@ -529,12 +529,12 @@ _LATER_COLUMNS = {
     # related_person_name lets a single parcel carry multiple persons from
     # one advanced-mode lookup (officer/manager + owner, etc.).
     "contacts": (
-        ("dead", "BOOLEAN DEFAULT 0"),
-        ("wrong_person", "BOOLEAN DEFAULT 0"),
+        ("dead", "INTEGER DEFAULT 0"),
+        ("wrong_person", "INTEGER DEFAULT 0"),
         ("confidence_pct", "INTEGER"),
         ("enrichment_source", "TEXT"),
         ("related_person_name", "TEXT"),
-        ("dead_at", "TIMESTAMP"),
+        ("dead_at", "TEXT"),
         ("dead_reason", "TEXT"),
     ),
 }
@@ -564,6 +564,25 @@ def init_db(db_path: Path) -> None:
             "ON outreach(pin, touch_number) WHERE touch_number IS NOT NULL"
         )
         # ---- Skip-trace enrichment tables (Plan 2026-05-23) ----
+        # Order matters: enrichment_results FKs enrichment_jobs(id), so the
+        # jobs table is created first. Indexes on enrichment_results follow
+        # immediately after enrichment_results is defined.
+        # Batch job: a set of pins submitted to the enrichment orchestrator.
+        # pin_list_json holds the original input set so we can resume after
+        # restarts; per-pin progress lives in enrichment_job_pins.
+        # created_at/completed_at default to ISO-8601-with-Z to match the
+        # project convention (see pipeline/cadence.py, outreach code).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS enrichment_jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pin_list_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                paused_reason TEXT,
+                total_cost_usd REAL DEFAULT 0.0,
+                created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                completed_at TEXT
+            )
+        """)
         # One row per provider call. raw_response_json preserved verbatim
         # so we can backfill new fields without re-paying for lookups.
         conn.execute("""
@@ -579,7 +598,9 @@ def init_db(db_path: Path) -> None:
                 cost_usd REAL NOT NULL,
                 status TEXT NOT NULL,
                 error_message TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                FOREIGN KEY(pin) REFERENCES parcels(pin),
+                FOREIGN KEY(job_id) REFERENCES enrichment_jobs(id)
             )
         """)
         conn.execute(
@@ -590,27 +611,15 @@ def init_db(db_path: Path) -> None:
             "CREATE INDEX IF NOT EXISTS idx_enrichment_results_job "
             "ON enrichment_results(job_id)"
         )
-        # Batch job: a set of pins submitted to the enrichment orchestrator.
-        # pin_list_json holds the original input set so we can resume after
-        # restarts; per-pin progress lives in enrichment_job_pins.
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS enrichment_jobs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                pin_list_json TEXT NOT NULL,
-                status TEXT NOT NULL,
-                paused_reason TEXT,
-                total_cost_usd REAL DEFAULT 0.0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                completed_at TIMESTAMP
-            )
-        """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS enrichment_job_pins (
                 job_id INTEGER NOT NULL,
                 pin TEXT NOT NULL,
                 status TEXT NOT NULL,
                 error_message TEXT,
-                PRIMARY KEY (job_id, pin)
+                PRIMARY KEY (job_id, pin),
+                FOREIGN KEY(job_id) REFERENCES enrichment_jobs(id),
+                FOREIGN KEY(pin) REFERENCES parcels(pin)
             )
         """)
         # Singleton row holding the Gmail bounce poller's resume cursor.
@@ -620,7 +629,7 @@ def init_db(db_path: Path) -> None:
             CREATE TABLE IF NOT EXISTS bounce_poll_state (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 last_message_id TEXT,
-                last_polled_at TIMESTAMP
+                last_polled_at TEXT
             )
         """)
         conn.execute("INSERT OR IGNORE INTO bounce_poll_state(id) VALUES (1)")

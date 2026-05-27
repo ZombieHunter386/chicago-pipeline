@@ -62,3 +62,66 @@ def test_existing_contacts_rows_get_default_dead_false(tmp_path):
             "SELECT dead, wrong_person FROM contacts WHERE pin='14321010010000'"
         ).fetchone()
     assert row == (0, 0)
+
+
+def test_enrichment_tables_accept_inserts(fresh_db: Path):
+    """Stronger than the name-exists check: actually insert into each
+    new table and verify the row lands. Catches DDL typos."""
+    with sqlite3.connect(fresh_db) as conn:
+        # parcels row needed for FK satisfaction
+        conn.execute(
+            "INSERT INTO parcels(pin, owner_name, mail_address) "
+            "VALUES ('14321010010000', 'TEST', '123 MAIN ST')"
+        )
+        # enrichment_jobs (no FK)
+        conn.execute(
+            "INSERT INTO enrichment_jobs(pin_list_json, status) "
+            "VALUES ('[]', 'running')"
+        )
+        job_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        # enrichment_results
+        conn.execute(
+            "INSERT INTO enrichment_results(pin, job_id, provider, lookup_type, "
+            "query_name, raw_response_json, cost_usd, status) "
+            "VALUES ('14321010010000', ?, 'tracerfy', 'skip_trace_normal', "
+            "'TEST', '{}', 0.10, 'success')",
+            (job_id,),
+        )
+        # enrichment_job_pins
+        conn.execute(
+            "INSERT INTO enrichment_job_pins(job_id, pin, status) "
+            "VALUES (?, '14321010010000', 'done')",
+            (job_id,),
+        )
+        conn.commit()
+        # Sanity: all rows present
+        assert conn.execute("SELECT COUNT(*) FROM enrichment_jobs").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM enrichment_results").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM enrichment_job_pins").fetchone()[0] == 1
+
+
+def test_bounce_poll_state_singleton_enforced(fresh_db: Path):
+    """CHECK (id = 1) must prevent a second row."""
+    with sqlite3.connect(fresh_db) as conn:
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("INSERT INTO bounce_poll_state(id) VALUES (2)")
+
+
+def test_timestamps_use_iso_z_format(fresh_db: Path):
+    """The TEXT timestamp columns default to ISO-8601 with Z suffix,
+    matching the project's format convention used in cadence + outreach."""
+    import re
+    iso_z = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+    with sqlite3.connect(fresh_db) as conn:
+        conn.execute(
+            "INSERT INTO parcels(pin, owner_name, mail_address) "
+            "VALUES ('14321010010000', 'X', 'Y')"
+        )
+        conn.execute(
+            "INSERT INTO enrichment_jobs(pin_list_json, status) "
+            "VALUES ('[]', 'running')"
+        )
+        row = conn.execute(
+            "SELECT created_at FROM enrichment_jobs"
+        ).fetchone()
+        assert iso_z.match(row[0]), f"Expected ISO-Z, got {row[0]!r}"
