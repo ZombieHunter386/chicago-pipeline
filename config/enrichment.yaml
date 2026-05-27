@@ -1,0 +1,12 @@
+# Enrichment provider config + budget caps.
+# Soft cap → UI confirmation prompt. Hard cap → bulk job auto-pauses.
+# Hard cap is sized to allow a 20-pin bulk button at $0.10/hit ($2.00)
+# with $0.50 headroom.
+budget:
+  soft_daily_usd: 5.00
+  hard_per_run_usd: 2.50
+
+# Provider selection — change here if you swap providers.
+# The adapter file must exist at pipeline/enrichment_providers/<name>.py
+# and export a get_provider() function returning the adapter instance.
+skip_trace_provider: tracerfy

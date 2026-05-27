@@ -106,3 +106,36 @@ class EnrichmentProvider(Protocol):
         whatever it has without branching on mode itself.
         """
         ...
+
+
+# ---------- Budget caps ----------
+
+class BudgetExceeded(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class BudgetCap:
+    soft_daily_usd: float
+    hard_per_run_usd: float
+
+    def would_exceed_soft(self, conn, *, additional_cost: float) -> bool:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(cost_usd), 0.0) AS s FROM enrichment_results "
+            "WHERE created_at >= date('now')"
+        ).fetchone()
+        spent_today = row["s"] if hasattr(row, "keys") else row[0]
+        return (spent_today + additional_cost) > self.soft_daily_usd
+
+    def check_or_raise(self, conn, *, job_id: int, additional_cost: float) -> None:
+        row = conn.execute(
+            "SELECT COALESCE(total_cost_usd, 0.0) AS c FROM enrichment_jobs "
+            "WHERE id = ?", (job_id,),
+        ).fetchone()
+        spent_this_run = row["c"] if hasattr(row, "keys") else row[0]
+        if (spent_this_run + additional_cost) > self.hard_per_run_usd:
+            raise BudgetExceeded(
+                f"Hard per-run cap of ${self.hard_per_run_usd:.2f} would be "
+                f"exceeded (run spent ${spent_this_run:.2f}, "
+                f"additional ${additional_cost:.2f})"
+            )
