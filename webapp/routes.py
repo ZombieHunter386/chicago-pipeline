@@ -722,11 +722,126 @@ def register(app: Flask) -> None:
                 ).fetchone()
             return jsonify({"contact": dict(row)})
 
+        @app.post("/api/enrichment/lookup/<pin>")
+        def api_enrichment_lookup(pin: str):
+            if not pin.isdigit() or len(pin) != 14:
+                abort(400, "invalid pin")
+            provider = app.config.get("ENRICHMENT_SKIP_PROVIDER")
+            budget = app.config.get("ENRICHMENT_BUDGET")
+            if not provider:
+                abort(503, "Enrichment provider not configured (set TRACERFY_API_KEY)")
+            with closing(_conn()) as conn:
+                parcel = conn.execute(
+                    "SELECT * FROM parcels WHERE pin=?", (pin,)
+                ).fetchone()
+                if parcel is None:
+                    abort(404)
+                from pipeline.enrichment import _has_fresh_contacts, _enrich_one_pin
+                if _has_fresh_contacts(conn, pin):
+                    abort(409, "parcel already has contacts (no auto re-enrich)")
+                # Single-parcel lookup uses the soft daily cap only — the hard
+                # per-run cap is bulk-job-scoped. If over soft and the user
+                # hasn't passed ?confirm=true, surface 429 so the UI can prompt.
+                if budget.would_exceed_soft(
+                    conn, additional_cost=provider.cost_per_lookup_usd,
+                ) and request.args.get("confirm") != "true":
+                    abort(429, "soft daily cap would be exceeded; resend with ?confirm=true to override")
+                try:
+                    _enrich_one_pin(conn, job_id=None, pin=pin, provider=provider)
+                    conn.commit()
+                except Exception as e:
+                    abort(500, str(e))
+                rows = [dict(r) for r in conn.execute(
+                    "SELECT * FROM contacts WHERE pin=?", (pin,)
+                )]
+            return jsonify({"status": "success", "contacts": rows})
+
+        @app.post("/api/enrichment/bulk")
+        def api_enrichment_bulk():
+            data = request.get_json(silent=True) or {}
+            pins = data.get("pins") or []
+            if not isinstance(pins, list) or not pins:
+                abort(400, "pins must be a non-empty list")
+            for p in pins:
+                if not (isinstance(p, str) and p.isdigit() and len(p) == 14):
+                    abort(400, f"invalid pin: {p}")
+            provider = app.config.get("ENRICHMENT_SKIP_PROVIDER")
+            budget = app.config.get("ENRICHMENT_BUDGET")
+            if not provider:
+                abort(503, "Enrichment provider not configured (set TRACERFY_API_KEY)")
+            db_path = Path(app.config["DB_PATH"])
+            def conn_factory():
+                c = sqlite3.connect(db_path)
+                c.row_factory = sqlite3.Row
+                return c
+            from pipeline.enrichment import create_enrichment_job, run_bulk_enrichment
+            with closing(conn_factory()) as conn:
+                job_id = create_enrichment_job(conn, pins)
+                conn.commit()
+            import threading
+            threading.Thread(
+                target=run_bulk_enrichment,
+                kwargs=dict(conn_factory=conn_factory, job_id=job_id, pin_list=pins,
+                            provider=provider, budget=budget),
+                daemon=True,
+            ).start()
+            return jsonify({"job_id": job_id}), 202
+
+        @app.get("/api/enrichment/job/<int:job_id>")
+        def api_enrichment_job_status(job_id: int):
+            with closing(_conn()) as conn:
+                job = conn.execute(
+                    "SELECT * FROM enrichment_jobs WHERE id=?", (job_id,)
+                ).fetchone()
+                if job is None:
+                    abort(404)
+                pins = conn.execute(
+                    "SELECT pin, status, error_message FROM enrichment_job_pins WHERE job_id=?",
+                    (job_id,)
+                ).fetchall()
+            return jsonify({
+                "job_id": job_id,
+                "status": job["status"],
+                "paused_reason": job["paused_reason"],
+                "total_cost_usd": job["total_cost_usd"],
+                "pins": [dict(p) for p in pins],
+            })
+
+        @app.post("/api/contacts/<int:contact_id>/dead")
+        def api_contact_mark_dead(contact_id: int):
+            with closing(_conn()) as conn:
+                cur = conn.execute(
+                    "UPDATE contacts SET dead=1, "
+                    "dead_at=strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), "
+                    "dead_reason='manual' WHERE contact_id=?",
+                    (contact_id,),
+                )
+                if cur.rowcount == 0:
+                    abort(404)
+                conn.commit()
+            return jsonify({"ok": True})
+
+        @app.post("/api/contacts/<int:contact_id>/wrong-person")
+        def api_contact_mark_wrong_person(contact_id: int):
+            with closing(_conn()) as conn:
+                cur = conn.execute(
+                    "UPDATE contacts SET wrong_person=1 WHERE contact_id=?",
+                    (contact_id,),
+                )
+                if cur.rowcount == 0:
+                    abort(404)
+                conn.commit()
+            return jsonify({"ok": True})
+
         @app.post("/api/outreach/send")
         def api_outreach_send():
             data = request.get_json(silent=True) or {}
             pin = data.get("pin") or ""
             to = data.get("to") or ""
+            to_list = data.get("to_list") or []
+            # Backwards-compat: if only `to` was supplied, treat it as a 1-item list.
+            if to and not to_list:
+                to_list = [to]
             subject = data.get("subject")
             body = data.get("body")
             touch_number = data.get("touch_number", 1)
@@ -734,8 +849,11 @@ def register(app: Flask) -> None:
                 abort(400, "touch_number must be a positive integer")
             if not pin.isdigit() or len(pin) != 14:
                 abort(400, "invalid pin")
-            if not EMAIL_RE.match(to):
-                abort(400, "invalid recipient email")
+            if not to_list:
+                abort(400, "to or to_list is required")
+            for addr in to_list:
+                if not EMAIL_RE.match(addr):
+                    abort(400, f"invalid recipient email: {addr}")
             if not subject or body is None:
                 abort(400, "subject and body are required")
 
@@ -746,6 +864,16 @@ def register(app: Flask) -> None:
 
             with closing(_conn()) as conn:
                 _parcel_or_404(conn, pin)
+                # Every requested address must already be an alive contact
+                # for this pin — guards against fat-fingered manual sends
+                # bypassing the dead/wrong_person tombstones.
+                alive = {r["email"] for r in conn.execute(
+                    "SELECT email FROM contacts WHERE pin=? AND dead=0 AND wrong_person=0 "
+                    "AND email IS NOT NULL", (pin,)
+                )}
+                bad = [a for a in to_list if a not in alive]
+                if bad:
+                    abort(400, f"addresses are not alive contacts: {', '.join(bad)}")
                 # Validate the touch_number is next-due for this parcel.
                 outreach_rows = [
                     dict(r) for r in conn.execute(
@@ -762,14 +890,18 @@ def register(app: Flask) -> None:
                 except ValueError as e:
                     abort(400, str(e))
 
-                cid = outreach_module.upsert_contact(
-                    conn, pin=pin, email=to, source="manual"
-                )
+                contact_ids = [
+                    outreach_module.upsert_contact(conn, pin=pin, email=addr, source="manual")
+                    for addr in to_list
+                ]
+                cid = contact_ids[0]
 
                 try:
                     result = gmail_client.send_email(
                         token_path=Path(app.config["GMAIL_TOKEN_PATH"]),
-                        sender=sender, to=to,
+                        sender=sender,
+                        to=sender,                  # visible To: header is the sender per BCC convention
+                        bcc=to_list,                # actual delivery
                         subject=subject, body=body,
                     )
                 except gmail_client.GmailNotConnectedError as e:
