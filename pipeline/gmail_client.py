@@ -111,8 +111,16 @@ def send_email(
     to: str,
     subject: str,
     body: str,
+    bcc: list[str] | None = None,
 ) -> dict[str, str]:
-    """Send a plain-text email via Gmail API. Returns {id, threadId}."""
+    """Send a plain-text email via Gmail API. Returns {id, threadId}.
+
+    bcc: optional list of recipient addresses. When provided, addresses are
+    added to a Bcc: header so the visible To: stays set to `to` (typically
+    the sender's own inbox for BCC-fanout outreach) while Gmail delivers to
+    every Bcc address as well. Recipients on the Bcc list do not see each
+    other or the full To/From conversation, matching standard BCC semantics.
+    """
     creds = load_credentials(token_path)
     service = build("gmail", "v1", credentials=creds, cache_discovery=False)
 
@@ -120,6 +128,8 @@ def send_email(
     msg["From"] = sender
     msg["To"] = to
     msg["Subject"] = subject
+    if bcc:
+        msg["Bcc"] = ", ".join(bcc)
     msg.set_content(body)
 
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()

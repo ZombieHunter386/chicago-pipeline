@@ -213,3 +213,39 @@ def test_send_email_raises_when_disconnected(tmp_path: Path) -> None:
             sender="me@example.com", to="t@example.com",
             subject="x", body="y",
         )
+
+
+def test_send_email_with_bcc_includes_bcc_header(tmp_path: Path) -> None:
+    """send_email accepts bcc=list[str] and includes a Bcc: header in the MIME
+    message. For the T10 BCC-fanout outreach flow, the visible To: stays set
+    to the sender so owners see a professional single-recipient header while
+    Gmail delivers to every Bcc address."""
+    token = _saved_token(tmp_path)
+    with patch("pipeline.gmail_client.build") as build_mock, \
+         patch("pipeline.gmail_client.Credentials") as creds_cls:
+        service = MagicMock()
+        users = MagicMock()
+        messages = MagicMock()
+        send = MagicMock()
+        send.execute = MagicMock(return_value={"id": "fake-id", "threadId": "fake-thread"})
+        messages.send.return_value = send
+        users.messages.return_value = messages
+        service.users.return_value = users
+        build_mock.return_value = service
+        creds_cls.from_authorized_user_info.return_value = MagicMock(expired=False)
+
+        result = send_email(
+            token_path=token,
+            sender="me@example.com",
+            to="me@example.com",
+            bcc=["a@x.com", "b@y.com"],
+            subject="hi",
+            body="hello",
+        )
+    assert result == {"id": "fake-id", "threadId": "fake-thread"}
+
+    # Decode the raw MIME the API was sent and verify both headers landed.
+    args, kwargs = messages.send.call_args
+    raw = base64.urlsafe_b64decode(kwargs["body"]["raw"]).decode()
+    assert "Bcc: a@x.com, b@y.com" in raw
+    assert "To: me@example.com" in raw
