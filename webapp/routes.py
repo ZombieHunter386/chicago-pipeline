@@ -481,14 +481,15 @@ def register(app: Flask) -> None:
                         "available": True,
                     }
 
-            # Response shape: preserve the legacy single `contact` field
-            # (frontend still reads data.contact). The multi-contact UI is a
-            # T11/T12 deliverable; until then we hand back the first row so
-            # existing compose/send flows keep working.
+            # Response shape: keep the legacy single `contact` field for any
+            # callers still reading it, and add `contacts` (plural) which the
+            # T11 multi-row UI consumes. `contact` mirrors contacts[0] so old
+            # paths keep working during the T11→T13 transition.
             primary_contact = contacts[0] if contacts else None
             return jsonify({
                 "pin": pin,
                 "contact": primary_contact,
+                "contacts": contacts,
                 "outreach": outreach_dicts,
                 "gmail_connected": gmail_client.is_connected(
                     Path(app.config["GMAIL_TOKEN_PATH"])
