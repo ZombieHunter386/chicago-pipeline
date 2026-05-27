@@ -1,0 +1,183 @@
+{
+  "address": "123 Main St",
+  "city": "Chicago",
+  "state": "IL",
+  "zip": "60601",
+  "find_owner": true,
+  "hit": true,
+  "persons_count": 3,
+  "credits_deducted": 5,
+  "persons": [
+    {
+      "first_name": "Jane",
+      "last_name": "Doe",
+      "full_name": "Jane Doe",
+      "dob": "1970-01-01",
+      "age": "54",
+      "deceased": false,
+      "property_owner": false,
+      "litigator": false,
+      "mailing_address": {
+        "street": "123 Main St",
+        "city": "Chicago",
+        "state": "IL",
+        "zip": "60601"
+      },
+      "phones": [
+        {
+          "number": "3125550000",
+          "type": "Mobile",
+          "dnc": true,
+          "carrier": "CELLCO PARTNERSHIP DBA VERIZON WIRELESS - VA",
+          "rank": 1
+        },
+        {
+          "number": "3125550001",
+          "type": "Landline",
+          "dnc": true,
+          "carrier": "ILLINOIS BELL TEL CO",
+          "rank": 2
+        },
+        {
+          "number": "3125550002",
+          "type": "Landline",
+          "dnc": false,
+          "carrier": "WINDSTREAM NORTH CAROLINA- INC.",
+          "rank": 3
+        }
+      ],
+      "emails": [
+        {
+          "email": "jane.doe0@example.com",
+          "rank": 1
+        }
+      ]
+    },
+    {
+      "first_name": "John",
+      "last_name": "Smith",
+      "full_name": "John Smith",
+      "dob": "1965-05-15",
+      "age": "60",
+      "deceased": false,
+      "property_owner": false,
+      "litigator": false,
+      "mailing_address": {
+        "street": "123 Main St",
+        "city": "Chicago",
+        "state": "IL",
+        "zip": "60601"
+      },
+      "phones": [
+        {
+          "number": "3125550010",
+          "type": "Mobile",
+          "dnc": true,
+          "carrier": "CELLCO PARTNERSHIP DBA VERIZON WIRELESS - IL",
+          "rank": 1
+        },
+        {
+          "number": "3125550011",
+          "type": "Landline",
+          "dnc": true,
+          "carrier": "ILLINOIS BELL TEL CO",
+          "rank": 2
+        },
+        {
+          "number": "3125550012",
+          "type": "Landline",
+          "dnc": true,
+          "carrier": "ILLINOIS BELL TEL CO",
+          "rank": 3
+        },
+        {
+          "number": "3125550013",
+          "type": "Landline",
+          "dnc": false,
+          "carrier": "COMCAST IP PHONE- LLC",
+          "rank": 4
+        },
+        {
+          "number": "3125550014",
+          "type": "Landline",
+          "dnc": true,
+          "carrier": "COMCAST IP PHONE- LLC",
+          "rank": 5
+        }
+      ],
+      "emails": [
+        {
+          "email": "john.smith0@example.com",
+          "rank": 1
+        }
+      ]
+    },
+    {
+      "first_name": "Sam",
+      "last_name": "Lee",
+      "full_name": "Sam Lee",
+      "dob": "1980-09-09",
+      "age": "45",
+      "deceased": false,
+      "property_owner": false,
+      "litigator": false,
+      "mailing_address": {
+        "street": "123 Main St",
+        "city": "Chicago",
+        "state": "IL",
+        "zip": "60601"
+      },
+      "phones": [
+        {
+          "number": "3125550020",
+          "type": "Mobile",
+          "dnc": true,
+          "carrier": "T-MOBILE USA- INC.",
+          "rank": 1
+        },
+        {
+          "number": "3125550021",
+          "type": "Mobile",
+          "dnc": true,
+          "carrier": "NEW CINGULAR WIRELESS PCS- LLC - IL",
+          "rank": 2
+        },
+        {
+          "number": "3125550022",
+          "type": "Landline",
+          "dnc": true,
+          "carrier": "ILLINOIS BELL TEL CO",
+          "rank": 3
+        },
+        {
+          "number": "3125550023",
+          "type": "Landline",
+          "dnc": false,
+          "carrier": "ILLINOIS BELL TEL CO",
+          "rank": 4
+        },
+        {
+          "number": "3125550024",
+          "type": "Landline",
+          "dnc": true,
+          "carrier": "COMCAST IP PHONE- LLC",
+          "rank": 5
+        }
+      ],
+      "emails": [
+        {
+          "email": "sam.lee0@example.com",
+          "rank": 1
+        },
+        {
+          "email": "sam.lee1@example.com",
+          "rank": 2
+        },
+        {
+          "email": "sam.lee2@example.com",
+          "rank": 3
+        }
+      ]
+    }
+  ]
+}
