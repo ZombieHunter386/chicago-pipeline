@@ -236,11 +236,10 @@ def all_due_touches(conn, cadence_config: dict, today: date) -> dict:
                 "days_overdue": d["days_overdue"],
             }
             if d["channel"] == "email":
-                # First alive email = primary To: address. The full alive list
-                # is provided so downstream (T4 BCC fanout) can BCC the rest.
+                # First alive email = primary To: address. Downstream BCC
+                # fanout (T4) builds its own list from contacts at send time.
                 if alive_emails:
                     item["to_email"] = alive_emails[0]
-                    item["bcc_emails"] = alive_emails[1:]
             elif d["channel"] == "phone":
                 if alive_phones:
                     item["to_phone"] = alive_phones[0]
