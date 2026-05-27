@@ -65,9 +65,15 @@ def test_existing_contacts_rows_get_default_dead_false(tmp_path):
 
 
 def test_enrichment_tables_accept_inserts(fresh_db: Path):
-    """Stronger than the name-exists check: actually insert into each
-    new table and verify the row lands. Catches DDL typos."""
+    """Stronger than the name-exists check: actually insert into each new
+    table with FKs enforced and verify the row lands. Catches DDL typos
+    AND regression-protects the foreign-key declarations."""
     with sqlite3.connect(fresh_db) as conn:
+        # FKs are off by default on a bare sqlite3.connect — enable so
+        # the FK clauses on these tables are actually exercised by this
+        # test. Production code goes through pipeline.db.get_connection
+        # which sets this pragma; tests using bare connect() do not.
+        conn.execute("PRAGMA foreign_keys=ON")
         # parcels row needed for FK satisfaction
         conn.execute(
             "INSERT INTO parcels(pin, owner_name, mail_address) "
@@ -98,6 +104,37 @@ def test_enrichment_tables_accept_inserts(fresh_db: Path):
         assert conn.execute("SELECT COUNT(*) FROM enrichment_jobs").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM enrichment_results").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM enrichment_job_pins").fetchone()[0] == 1
+
+
+def test_enrichment_results_fk_enforced(fresh_db: Path):
+    """Inserting an enrichment_results row with a missing parent pin
+    raises IntegrityError. Locks in the FK declaration so future devs
+    can't silently drop it."""
+    with sqlite3.connect(fresh_db) as conn:
+        conn.execute("PRAGMA foreign_keys=ON")
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO enrichment_results(pin, provider, lookup_type, "
+                "query_name, raw_response_json, cost_usd, status) "
+                "VALUES ('99999999999999', 'tracerfy', 'skip_trace_normal', "
+                "'X', '{}', 0.10, 'success')"
+            )
+
+
+def test_enrichment_job_pins_fk_enforced(fresh_db: Path):
+    """Same regression-protection for enrichment_job_pins.job_id."""
+    with sqlite3.connect(fresh_db) as conn:
+        conn.execute("PRAGMA foreign_keys=ON")
+        # parcel exists, but job_id does not
+        conn.execute(
+            "INSERT INTO parcels(pin, owner_name, mail_address) "
+            "VALUES ('14321010010000', 'X', 'Y')"
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO enrichment_job_pins(job_id, pin, status) "
+                "VALUES (99999, '14321010010000', 'done')"
+            )
 
 
 def test_bounce_poll_state_singleton_enforced(fresh_db: Path):
