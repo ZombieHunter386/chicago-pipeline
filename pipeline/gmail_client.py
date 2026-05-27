@@ -26,7 +26,16 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
 
-SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
+# gmail.send: outreach worker writes new messages.
+# gmail.readonly: bounce poller reads mailer-daemon bouncebacks (T9). The
+# readonly scope is the narrowest one that supports messages.list/get with
+# format=raw — modify/labels would be over-broad for a read-only sweep.
+# Adding a scope requires re-running the OAuth consent flow (the existing
+# refresh token still works but lacks readonly until the user reconnects).
+SCOPES = [
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.readonly",
+]
 
 
 class GmailNotConnectedError(RuntimeError):
@@ -139,3 +148,64 @@ def send_email(
         .execute()
     )
     return {"id": sent.get("id", ""), "threadId": sent.get("threadId", "")}
+
+
+def fetch_mailer_daemon_messages(
+    *,
+    token_path: Path,
+    since_message_id: str | None = None,
+    max_results: int = 50,
+) -> list[tuple[str, str]]:
+    """Return [(message_id, decoded_body), ...] for mailer-daemon bouncebacks.
+
+    Gmail's messages.list returns newest-first; we walk that order and
+    stop when we hit `since_message_id` (the cursor saved by the previous
+    poll) so we don't re-process old bouncebacks. The 7-day q-filter is a
+    belt-and-suspenders bound in case the cursor is lost or wrong — the
+    poller still won't miss messages because subsequent polls overlap.
+
+    Bodies are returned as the decoded raw RFC-822 source (str) so the
+    parser can scan for Final-Recipient headers across the multipart
+    structure without us having to walk it here.
+    """
+    creds = load_credentials(token_path)
+    service = build("gmail", "v1", credentials=creds, cache_discovery=False)
+
+    listing = (
+        service.users().messages()
+        .list(
+            userId="me",
+            q="from:mailer-daemon newer_than:7d",
+            maxResults=max_results,
+        )
+        .execute()
+    )
+    items = listing.get("messages", []) or []
+
+    out: list[tuple[str, str]] = []
+    for item in items:
+        msg_id = item.get("id")
+        if not msg_id:
+            continue
+        # Stop at the resume cursor — everything past this id has already
+        # been processed by a prior poll.
+        if since_message_id and msg_id == since_message_id:
+            break
+        msg = (
+            service.users().messages()
+            .get(userId="me", id=msg_id, format="raw")
+            .execute()
+        )
+        raw_b64 = msg.get("raw", "")
+        if not raw_b64:
+            continue
+        # Gmail returns urlsafe base64 without padding; `urlsafe_b64decode`
+        # tolerates the missing padding when we pad it back to a multiple
+        # of 4 ourselves. Decode as latin-1 so any non-UTF bytes (rare but
+        # legal in MIME headers) survive — the parser is regex-based and
+        # only needs ASCII-range bytes to match Final-Recipient.
+        padded = raw_b64 + "=" * (-len(raw_b64) % 4)
+        raw_bytes = base64.urlsafe_b64decode(padded)
+        body = raw_bytes.decode("latin-1", errors="replace")
+        out.append((msg_id, body))
+    return out

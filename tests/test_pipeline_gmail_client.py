@@ -125,7 +125,12 @@ def test_build_authorization_url_returns_url_and_state(tmp_path: Path) -> None:
     assert state == "state-abc"
     # We pass scopes and redirect to Flow.from_client_secrets_file
     args, kwargs = flow_cls.from_client_secrets_file.call_args
-    assert kwargs["scopes"] == ["https://www.googleapis.com/auth/gmail.send"]
+    # gmail.send for outreach + gmail.readonly so the T9 bounce poller can
+    # read mailer-daemon DSNs. Both scopes are requested at consent time.
+    assert kwargs["scopes"] == [
+        "https://www.googleapis.com/auth/gmail.send",
+        "https://www.googleapis.com/auth/gmail.readonly",
+    ]
     assert kwargs["redirect_uri"] == "http://localhost:5051/api/oauth/callback"
     # The two kwargs that make the OAuth flow actually return a refresh_token.
     # Dropping either silently breaks token persistence on re-authorization.
