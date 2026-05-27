@@ -400,6 +400,97 @@ def test_all_due_touches_includes_channel_and_to_address_on_each_item(db, cfg):
     assert email_items[0]["to_email"] == "j@b.com"
 
 
+# ---------- Multi-contact (Task 3) ----------
+#
+# These tests verify per-row alive filtering for multi-contact parcels.
+# `outreach_rows` includes a touch_1 anchor (existing engine semantic — no
+# touch_1 → no due touches), and we verify that touch 2's `requires=email`
+# check uses the *aggregate* alive-email count across all contact rows
+# (one alive email is enough to satisfy the requires check), not the first
+# row only. The spec also requires backwards compat with the single-contact
+# `contact=<dict>` form.
+
+
+def test_next_due_with_multiple_contacts_at_least_one_alive_email():
+    """When at least one email is alive across the contact rows, the engine
+    returns the email touch. The recipient list is computed separately by the
+    caller via alive_emails_for_parcel(contacts)."""
+    cadence = {
+        "sequence": [
+            {"touch": 1, "day_offset": 0, "channel": "email",
+             "template": "t1", "requires": "email"},
+            {"touch": 2, "day_offset": 3, "channel": "email",
+             "template": "t2", "requires": "email"},
+        ],
+        "end_of_sequence_action": "surface_for_dead",
+        "end_of_sequence_grace_days": 0,
+    }
+    outreach_rows = [{"touch_number": 1, "sent_date": "2026-05-20T09:00:00Z"}]
+    contacts = [
+        {"email": "a@x.com", "dead": 1, "wrong_person": 0},  # dead
+        {"email": "b@x.com", "dead": 0, "wrong_person": 0},  # alive
+    ]
+    due = next_due_touches_for_parcel(
+        cadence_config=cadence, outreach_rows=outreach_rows,
+        contacts=contacts, parcel_mail_address="123 Main",
+        today=date(2026, 5, 23),
+    )
+    assert len(due) == 1
+    assert due[0]["touch"] == 2
+
+
+def test_next_due_with_multiple_contacts_all_dead_emails():
+    """When every email row is dead or wrong_person, the requires=email check
+    fails and the touch is skipped. Mirrors the existing single-contact behavior
+    of `test_touch_3_skipped_when_no_phone`: unsatisfiable requires → skip."""
+    cadence = {
+        "sequence": [
+            {"touch": 1, "day_offset": 0, "channel": "email",
+             "template": "t1", "requires": "email"},
+            {"touch": 2, "day_offset": 3, "channel": "email",
+             "template": "t2", "requires": "email"},
+        ],
+        "end_of_sequence_action": "surface_for_dead",
+        "end_of_sequence_grace_days": 0,
+    }
+    outreach_rows = [{"touch_number": 1, "sent_date": "2026-05-20T09:00:00Z"}]
+    contacts = [
+        {"email": "a@x.com", "dead": 1, "wrong_person": 0},
+        {"email": "b@x.com", "dead": 0, "wrong_person": 1},
+    ]
+    due = next_due_touches_for_parcel(
+        cadence_config=cadence, outreach_rows=outreach_rows,
+        contacts=contacts, parcel_mail_address="123 Main",
+        today=date(2026, 5, 23),
+    )
+    # All emails are dead/wrong → requires=email unsatisfied → touch 2 skipped.
+    # The caller will see alive_emails_for_parcel(contacts) == [] and render
+    # '(no email)' in the sequence row.
+    assert due == []
+
+
+def test_next_due_signature_accepts_either_contact_or_contacts():
+    """Backwards compat: callers may still pass `contact=<single dict>`."""
+    cadence = {
+        "sequence": [
+            {"touch": 1, "day_offset": 0, "channel": "email",
+             "template": "t1", "requires": "email"},
+            {"touch": 2, "day_offset": 3, "channel": "email",
+             "template": "t2", "requires": "email"},
+        ],
+        "end_of_sequence_action": "surface_for_dead",
+        "end_of_sequence_grace_days": 0,
+    }
+    outreach_rows = [{"touch_number": 1, "sent_date": "2026-05-20T09:00:00Z"}]
+    due = next_due_touches_for_parcel(
+        cadence_config=cadence, outreach_rows=outreach_rows,
+        contact={"email": "a@x.com", "dead": 0, "wrong_person": 0},
+        parcel_mail_address="123 Main", today=date(2026, 5, 23),
+    )
+    assert len(due) == 1
+    assert due[0]["touch"] == 2
+
+
 def test_all_due_touches_mail_items_carry_mail_address(db, tmp_path):
     """In a cadence with a mail touch, items get to_mail_address populated
     from the parcel's mail_address. The standard `cfg` fixture has no mail

@@ -434,9 +434,13 @@ def register(app: Flask) -> None:
         def api_parcel_outreach(pin: str):
             with closing(_conn()) as conn:
                 parcel = _parcel_or_404(conn, pin)
-                contact = conn.execute(
-                    "SELECT * FROM contacts WHERE pin = ? LIMIT 1", (pin,)
-                ).fetchone()
+                # All contact rows for the parcel — T3 dropped the LIMIT 1
+                # single-contact assumption; multi-row contacts (post-enrichment)
+                # are now the norm and the cadence engine filters dead rows.
+                contact_rows = conn.execute(
+                    "SELECT * FROM contacts WHERE pin = ?", (pin,)
+                ).fetchall()
+                contacts = [dict(r) for r in contact_rows]
                 outreach_rows = outreach_module.list_outreach_for_parcel(conn, pin)
                 outreach_dicts = [dict(r) for r in outreach_rows]
 
@@ -463,7 +467,7 @@ def register(app: Flask) -> None:
                 due_list = cadence_module.next_due_touches_for_parcel(
                     cadence_config=cadence,
                     outreach_rows=outreach_dicts,
-                    contact=dict(contact) if contact else None,
+                    contacts=contacts,
                     parcel_mail_address=parcel.get("mail_address"),
                     today=today,
                 )
@@ -477,9 +481,14 @@ def register(app: Flask) -> None:
                         "available": True,
                     }
 
+            # Response shape: preserve the legacy single `contact` field
+            # (frontend still reads data.contact). The multi-contact UI is a
+            # T11/T12 deliverable; until then we hand back the first row so
+            # existing compose/send flows keep working.
+            primary_contact = contacts[0] if contacts else None
             return jsonify({
                 "pin": pin,
-                "contact": dict(contact) if contact else None,
+                "contact": primary_contact,
                 "outreach": outreach_dicts,
                 "gmail_connected": gmail_client.is_connected(
                     Path(app.config["GMAIL_TOKEN_PATH"])
@@ -654,17 +663,19 @@ def register(app: Flask) -> None:
                     "touch_number": touch_number,
                     "sent_date": _now_iso(),
                 })
-                contact_row = conn.execute(
-                    "SELECT * FROM contacts WHERE pin = ? LIMIT 1", (pin,)
-                ).fetchone()
-                contact = dict(contact_row) if contact_row else None
+                # T3: fetch all contact rows; cadence engine applies the
+                # per-row alive filter (dead=0 AND wrong_person=0).
+                contact_rows = conn.execute(
+                    "SELECT * FROM contacts WHERE pin = ?", (pin,)
+                ).fetchall()
+                contacts = [dict(r) for r in contact_rows]
                 parcel_row = conn.execute(
                     "SELECT mail_address FROM parcels WHERE pin = ?", (pin,)
                 ).fetchone()
                 due = cadence_module.next_due_touches_for_parcel(
                     cadence_config=cadence,
                     outreach_rows=outreach_rows,
-                    contact=contact,
+                    contacts=contacts,
                     parcel_mail_address=parcel_row["mail_address"],
                     today=_today(),
                 )
