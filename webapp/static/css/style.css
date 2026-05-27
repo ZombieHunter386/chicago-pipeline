@@ -397,3 +397,155 @@
   align-items: center;
   flex-wrap: wrap;
 }
+
+/* ===== Due Today banner ===== */
+.due-today-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: #161b22;
+  border-bottom: 1px solid #30363d;
+  font-size: 12px;
+  color: #c9d1d9;
+}
+.due-today-bar[hidden] { display: none; }
+.due-today-label {
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+  color: #8b949e;
+}
+.due-today-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.due-today-chip {
+  background: #21262d;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 100ms ease, border-color 100ms ease;
+}
+.due-today-chip:hover {
+  background: #30363d;
+  border-color: #58a6ff;
+}
+.due-today-chip-email { color: #58a6ff; }
+.due-today-chip-phone { color: #f0883e; }
+.due-today-chip-mail { color: #a371f7; }
+.due-today-chip-end_of_sequence { color: #3fb950; }
+
+.due-today-dropdown {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  min-width: 320px;
+  max-width: 480px;
+  max-height: 60vh;
+  overflow-y: auto;
+  z-index: 9500;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.4);
+}
+.due-today-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #30363d;
+  padding: 10px 14px;
+  color: #c9d1d9;
+  cursor: pointer;
+}
+.due-today-row:last-child { border-bottom: none; }
+.due-today-row:hover { background: #21262d; }
+.due-today-row-main { display: flex; justify-content: space-between; font-size: 13px; }
+.due-today-row-owner { color: #8b949e; font-size: 11px; }
+.due-today-row-sub { color: #8b949e; font-size: 11px; padding-top: 2px; }
+.due-today-overdue {
+  display: inline-block;
+  background: #f85149;
+  color: white;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-weight: 600;
+}
+
+/* Adjust main panel offset when the bar is present */
+.main.has-due-bar { /* spacing handled by the flex layout — no extra margin needed */ }
+
+.digest-health-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: #58220e;
+  color: #ffd2a8;
+  font-size: 11px;
+  margin-left: auto;
+  cursor: help;
+}
+
+/* ===== Sequence timeline ===== */
+.seq-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 6px;
+}
+.seq-row {
+  display: grid;
+  grid-template-columns: 16px 18px 60px 1fr;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  padding: 4px 0;
+}
+.seq-icon { text-align: center; font-size: 14px; }
+.seq-num  { color: #8b949e; }
+.seq-channel { color: #c9d1d9; }
+.seq-date { color: #8b949e; }
+.seq-row-done .seq-icon { color: #3fb950; }
+.seq-row-current .seq-icon { color: #f0883e; }
+.seq-row-future .seq-icon { color: #484f58; }
+.seq-row-current { background: rgba(240, 136, 62, 0.06); border-radius: 4px; }
+.seq-req-missing { color: #8b949e; font-style: italic; font-size: 11px; }
+.seq-paused-badge {
+  display: inline-block;
+  background: #484f58;
+  color: white;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  margin-left: 6px;
+}
+.seq-eos-badge {
+  display: inline-block;
+  background: #3fb950;
+  color: white;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  margin-left: 6px;
+}
+
+/* ===== Manual touch modal ===== */
+.manual-template-text {
+  min-height: 180px;
+  background: #0d1117;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+}
+#manual-notes {
+  min-height: 80px;
+}

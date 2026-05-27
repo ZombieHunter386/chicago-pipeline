@@ -285,6 +285,36 @@ def _str_block_scalar_representer(dumper: yaml.Dumper, value: str):
 _BlockScalarDumper.add_representer(str, _str_block_scalar_representer)
 
 
+def validate_next_due_touch(
+    *,
+    outreach_rows: list[dict],
+    touch_number: int,
+) -> None:
+    """Raise ValueError if `touch_number` is not the next-due touch for this
+    parcel's outreach history. The route layer calls this before writing a
+    new outreach row to catch out-of-order or duplicate sends server-side
+    (the partial unique index on (pin, touch_number) catches races; this
+    catches clean-but-wrong client requests with a clearer error).
+
+    Contract: 'next-due' = max(completed touches) + 1. Assumes the DB
+    invariant that completed touches are contiguous starting at 1 — gaps
+    (e.g., [1, 3] without 2) cause this function to allow only touch 4,
+    not touch 2. Legacy rows with touch_number=None are filtered out."""
+    done = {
+        r["touch_number"]
+        for r in outreach_rows
+        if r.get("touch_number") is not None
+    }
+    if touch_number in done:
+        raise ValueError(f"touch {touch_number} already completed for this parcel")
+    expected = max(done) + 1 if done else 1
+    if touch_number != expected:
+        raise ValueError(
+            f"touch {touch_number} is not the next-due touch "
+            f"(expected {expected})"
+        )
+
+
 def _write_templates_yaml(path: Path, data: dict[str, Any]) -> None:
     """Write the templates YAML atomically. Temp file goes in the same dir
     so os.replace is atomic on the same filesystem."""

@@ -49,10 +49,27 @@ def templates_path(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def app_on(outreach_db_path: Path, templates_path: Path, tmp_path: Path):
+def cadence_path_in_outreach_tests(tmp_path: Path) -> Path:
+    p = tmp_path / "cadence.yaml"
+    p.write_text("""
+sequence:
+  - {touch: 1, day_offset: 0, channel: email, template: t1, requires: email}
+  - {touch: 2, day_offset: 3, channel: email, template: t1, requires: email}
+  - {touch: 5, day_offset: 19, channel: email, template: t1, requires: email}
+end_of_sequence_grace_days: 0
+""")
+    return p
+
+
+@pytest.fixture
+def app_on(outreach_db_path: Path, templates_path: Path,
+           cadence_path_in_outreach_tests: Path, tmp_path: Path):
+    from datetime import date
     return create_app(
         db_path=outreach_db_path, feature_outreach=True,
         outreach_templates_path=templates_path,
+        outreach_cadence_path=cadence_path_in_outreach_tests,
+        clock=lambda: date(2026, 5, 11),  # pinned for deterministic tests
         gmail_client_secrets_path=tmp_path / "client.json",
         gmail_token_path=tmp_path / "token.json",
         gmail_sender_address="me@example.com",
@@ -406,3 +423,140 @@ def test_oauth_start_404s_when_client_secrets_missing(app_on) -> None:
     resp = client.get("/api/oauth/start")
     assert resp.status_code == 503
     assert "client" in resp.get_data(as_text=True).lower()
+
+
+# ---------- T8: cadence-aware behaviors on existing routes ----------
+
+def test_send_outreach_accepts_touch_number(app_on, outreach_db_path):
+    """Send with touch_number=2 records the outreach row with that touch."""
+    import sqlite3
+    conn = sqlite3.connect(outreach_db_path)
+    conn.execute(
+        "INSERT INTO outreach (pin, touch_number, channel, sent_date) "
+        "VALUES (?, ?, ?, ?)",
+        ("14210010010000", 1, "email", "2026-05-08T09:00:00Z"),
+    )
+    conn.commit()
+    conn.close()
+    with patch("webapp.routes.gmail_client.send_email") as send_mock:
+        send_mock.return_value = {"id": "m2", "threadId": "t2"}
+        resp = app_on.test_client().post("/api/outreach/send", json={
+            "pin": "14210010010000", "to": "x@y.com",
+            "subject": "Touch 2", "body": "Day 3 follow-up",
+            "touch_number": 2,
+        })
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    conn = sqlite3.connect(outreach_db_path)
+    row = conn.execute(
+        "SELECT touch_number FROM outreach WHERE outreach_id = ?",
+        (resp.get_json()["outreach_id"],),
+    ).fetchone()
+    conn.close()
+    assert row[0] == 2
+
+
+def test_send_outreach_rejects_out_of_order_touch(app_on):
+    """Posting touch 5 on a parcel with no prior outreach history → 400
+    (expected touch is 1; 5 is out of order). validate_next_due_touch
+    catches this before any Gmail send happens — no mock needed."""
+    resp = app_on.test_client().post("/api/outreach/send", json={
+        "pin": "14210010010000", "to": "x@y.com",
+        "subject": "s", "body": "b", "touch_number": 5,
+    })
+    assert resp.status_code == 400
+
+
+def test_send_persists_gmail_message_id_to_dedicated_column(app_on, outreach_db_path):
+    """The send route writes the Gmail message id to its dedicated column,
+    NOT polluting the notes field. Replaces the prior 'gmail_message_id=X'
+    string-in-notes hack."""
+    import sqlite3
+    with patch("webapp.routes.gmail_client.send_email") as send_mock:
+        send_mock.return_value = {"id": "msg-abc-123", "threadId": "thr-1"}
+        resp = app_on.test_client().post("/api/outreach/send", json={
+            "pin": "14210010010000", "to": "x@y.com",
+            "subject": "s", "body": "b",
+        })
+    assert resp.status_code == 200
+    oid = resp.get_json()["outreach_id"]
+    conn = sqlite3.connect(outreach_db_path)
+    row = conn.execute(
+        "SELECT gmail_message_id, notes FROM outreach WHERE outreach_id = ?",
+        (oid,),
+    ).fetchone()
+    conn.close()
+    assert row[0] == "msg-abc-123"
+    # notes must NOT be polluted with the old "gmail_message_id=X" format
+    assert row[1] is None or "gmail_message_id=" not in row[1]
+
+
+def test_send_outreach_defaults_touch_number_to_1(app_on, outreach_db_path):
+    """Backward-compat: omitting touch_number sends touch 1."""
+    with patch("webapp.routes.gmail_client.send_email") as send_mock:
+        send_mock.return_value = {"id": "m", "threadId": "t"}
+        resp = app_on.test_client().post("/api/outreach/send", json={
+            "pin": "14210010010000", "to": "x@y.com",
+            "subject": "s", "body": "b",
+        })
+    assert resp.status_code == 200
+    import sqlite3
+    conn = sqlite3.connect(outreach_db_path)
+    row = conn.execute(
+        "SELECT touch_number FROM outreach WHERE outreach_id = ?",
+        (resp.get_json()["outreach_id"],),
+    ).fetchone()
+    conn.close()
+    assert row[0] == 1
+
+
+def test_get_parcel_outreach_includes_sequence_block(app_on, outreach_db_path):
+    """The detail endpoint returns a `sequence` block describing the
+    parcel's cadence state."""
+    import sqlite3
+    conn = sqlite3.connect(outreach_db_path)
+    conn.execute(
+        "UPDATE parcels SET stage = 'outreach', mail_address = ? WHERE pin = ?",
+        ("500 N Main", "14210010010000"),
+    )
+    conn.execute(
+        "INSERT INTO outreach (pin, touch_number, channel, sent_date) "
+        "VALUES (?, ?, ?, ?)",
+        ("14210010010000", 1, "email", "2026-05-08T09:00:00Z"),
+    )
+    conn.execute(
+        "INSERT INTO contacts (pin, email, source) VALUES (?, ?, ?)",
+        ("14210010010000", "js@example.com", "manual"),
+    )
+    conn.commit()
+    conn.close()
+    resp = app_on.test_client().get("/api/parcels/14210010010000/outreach")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert "sequence" in data
+    seq = data["sequence"]
+    assert seq["anchor_date"] == "2026-05-08"
+    assert seq["current_touch"] == 1
+    assert seq["next_due"] is not None
+    assert seq["next_due"]["touch"] == 2
+    assert seq["is_end_of_sequence"] is False
+    assert seq["is_paused"] is False
+
+
+def test_get_parcel_outreach_sequence_paused(app_on, outreach_db_path):
+    """When a parcel is paused, the sequence block reports it AND
+    suppresses next_due (the cadence engine never gets called)."""
+    import sqlite3
+    conn = sqlite3.connect(outreach_db_path)
+    conn.execute(
+        "UPDATE parcels SET outreach_paused = 1 WHERE pin = ?",
+        ("14210010010000",),
+    )
+    conn.commit()
+    conn.close()
+    resp = app_on.test_client().get("/api/parcels/14210010010000/outreach")
+    seq = resp.get_json()["sequence"]
+    assert seq["is_paused"] is True
+    # With no outreach rows AND paused, all derived fields stay defaults
+    assert seq["next_due"] is None
+    assert seq["anchor_date"] is None
+    assert seq["current_touch"] == 0

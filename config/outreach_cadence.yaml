@@ -1,0 +1,52 @@
+# Per-touch cadence config. The Flask app reads this on every page load,
+# so editing this file changes future schedule computations immediately —
+# no restart required. Note: mid-flight edits shift in-progress parcels
+# (cadence_version snapshotting is deferred); document any change here in
+# this header so future-you remembers when the rules shifted.
+#
+# Schema per item:
+#   touch:       integer (1..7) — the touch number; unique across the sequence
+#   day_offset:  integer — days from touch_1.sent_date when this touch is due
+#   channel:     "email" | "phone" | "mail"
+#   template:    name of the template in config/outreach_templates.yaml
+#   requires:    "email" | "phone" | "mail_address" — which contact field
+#                must be present for this touch to surface. mail_address is
+#                always present from assessor data.
+sequence:
+  - touch: 1
+    day_offset: 0
+    channel: email
+    template: initial-cold
+    requires: email
+  - touch: 2
+    day_offset: 3
+    channel: email
+    template: email-followup-3day
+    requires: email
+  - touch: 3
+    day_offset: 7
+    channel: phone
+    template: phone-script
+    requires: phone
+  - touch: 4
+    day_offset: 14
+    channel: mail
+    template: letter-day-14
+    requires: mail_address
+  - touch: 5
+    day_offset: 19
+    channel: email
+    template: email-new-angle-19
+    requires: email
+  - touch: 6
+    day_offset: 24
+    channel: mail
+    template: postcard-day-24
+    requires: mail_address
+  - touch: 7
+    day_offset: 30
+    channel: email
+    template: email-warm-close-30
+    requires: email
+end_of_sequence_action: surface_for_dead
+end_of_sequence_grace_days: 0

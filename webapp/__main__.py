@@ -2,6 +2,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 from dotenv import load_dotenv
+from pipeline.db import init_db
 from webapp.app import create_app
 
 
@@ -28,6 +29,13 @@ def main() -> None:
     if not args.db.exists():
         raise SystemExit(f"Database not found: {args.db}")
 
+    # Apply any pending _LATER_COLUMNS migrations to an existing DB. Idempotent:
+    # ALTER TABLE no-ops if the column exists. Without this, pulling code that
+    # adds a column leaves the dev DB out of sync until someone re-runs init_db
+    # manually — the failure mode is a 500 on the first query that touches the
+    # new column. Prod (wsgi.py) does its own migration handling.
+    init_db(args.db)
+
     # Outreach config reads from env so a developer can override paths without
     # touching code. All env vars are optional; defaults are baked into create_app.
     import os
@@ -35,6 +43,8 @@ def main() -> None:
     gmail_token = os.environ.get("GMAIL_TOKEN_PATH")
     gmail_sender = os.environ.get("GMAIL_SENDER_ADDRESS")
     esri_api_key = os.environ.get("ESRI_API_KEY")
+    digest_last_run = os.environ.get("DUE_DIGEST_LAST_RUN_PATH",
+                                     "data/due_digest_last_run.txt")
 
     if args.outreach:
         # oauthlib refuses to do OAuth over plain HTTP by default; the local
@@ -51,6 +61,7 @@ def main() -> None:
         gmail_token_path=Path(gmail_token) if gmail_token else None,
         gmail_sender_address=gmail_sender,
         esri_api_key=esri_api_key,
+        due_digest_last_run_path=Path(digest_last_run),
     )
     app.run(host="127.0.0.1", port=args.port, debug=args.debug)
 

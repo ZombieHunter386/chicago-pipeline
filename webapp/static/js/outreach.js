@@ -155,13 +155,25 @@
     });
 
     const btn = el.querySelector('#outreach-compose-btn');
-    btn.addEventListener('click', () => {
-      if (typeof window.__outreachOpenCompose === 'function') {
-        const liveEmail = input.value.trim();
-        const liveContact = liveEmail
-          ? Object.assign({}, data.contact || {}, { email: liveEmail })
-          : data.contact;
-        window.__outreachOpenCompose(parcel, liveContact, data.sender_address);
+    btn.addEventListener('click', async () => {
+      const liveEmail = input.value.trim();
+      const liveContact = liveEmail
+        ? Object.assign({}, data.contact || {}, { email: liveEmail })
+        : data.contact;
+      const nextDue = data.sequence && data.sequence.next_due;
+      const channel = nextDue ? nextDue.channel : 'email';
+      const touchNum = nextDue ? nextDue.touch : 1;
+
+      if (channel === 'email') {
+        if (typeof window.__outreachOpenCompose === 'function') {
+          window.__outreachOpenCompose(
+            parcel, liveContact, data.sender_address, touchNum,
+          );
+        }
+      } else if (channel === 'phone') {
+        await openPhoneModal(parcel, liveContact, touchNum);
+      } else if (channel === 'mail') {
+        await openMailModal(parcel, touchNum);
       }
     });
 
@@ -226,18 +238,24 @@
 
   // ---------- Stage section ----------
 
-  function renderStageSection(parcel) {
+  function renderStageSection(parcel, data) {
     const el = document.createElement('div');
     el.className = 'detail-section';
     const stages = ['scored', 'outreach', 'responded', 'introduced', 'dead'];
     const cur = parcel.stage || 'scored';
+    const seq = (data && data.sequence) || {};
+    const showPause = cur === 'outreach' && seq.anchor_date;
+    const showMarkDead = seq.is_end_of_sequence && cur !== 'dead';
+
     el.innerHTML = `
       <h3>Stage</h3>
       <div class="detail-grid" style="grid-template-columns: 1fr;">
-        <div class="detail-item">
+        <div class="detail-item" style="display:flex; gap:8px; align-items:center; flex-wrap: wrap;">
           <select id="outreach-stage-select" class="outreach-input outreach-stage-select">
             ${stages.map(s => `<option value="${s}"${s === cur ? ' selected' : ''}>${s}</option>`).join('')}
           </select>
+          ${showPause ? `<button type="button" class="btn btn-sm" id="outreach-pause-btn">${seq.is_paused ? '▶ Resume cadence' : '⏸ Pause cadence'}</button>` : ''}
+          ${showMarkDead ? '<button type="button" class="btn btn-sm" id="outreach-mark-dead-btn">Mark dead</button>' : ''}
         </div>
       </div>
     `;
@@ -246,11 +264,120 @@
       try {
         await setStage(parcel.pin, sel.value);
         showToast('Stage updated to "' + sel.value + '"', 'success');
+        window.dispatchEvent(new CustomEvent('outreach:refresh',
+                                              { detail: { pin: parcel.pin } }));
       } catch (e) {
         showToast("Couldn't update stage", 'error');
       }
     });
+    const pauseBtn = el.querySelector('#outreach-pause-btn');
+    if (pauseBtn) {
+      pauseBtn.addEventListener('click', async () => {
+        const target = !seq.is_paused;
+        try {
+          await fetch(`/api/parcels/${encodeURIComponent(parcel.pin)}/pause`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({paused: target}),
+          });
+          showToast(target ? 'Cadence paused' : 'Cadence resumed', 'success');
+          window.dispatchEvent(new CustomEvent('outreach:refresh',
+                                                { detail: { pin: parcel.pin } }));
+        } catch (e) {
+          showToast("Couldn't toggle pause", 'error');
+        }
+      });
+    }
+    const deadBtn = el.querySelector('#outreach-mark-dead-btn');
+    if (deadBtn) {
+      deadBtn.addEventListener('click', async () => {
+        try {
+          await setStage(parcel.pin, 'dead');
+          showToast('Marked dead', 'success');
+          window.dispatchEvent(new CustomEvent('outreach:refresh',
+                                                { detail: { pin: parcel.pin } }));
+        } catch (e) {
+          showToast("Couldn't mark dead", 'error');
+        }
+      });
+    }
     return el;
+  }
+
+  // ---------- Sequence timeline ----------
+
+  async function fetchCadenceConfig() {
+    const resp = await fetch('/api/cadence/config');
+    if (!resp.ok) throw new Error(`fetch cadence failed: ${resp.status}`);
+    return resp.json();
+  }
+
+  // Cache the cadence config per page-load; reload on outreach:refresh
+  let __cachedCadence = null;
+  async function getCadenceConfig() {
+    if (__cachedCadence) return __cachedCadence;
+    __cachedCadence = await fetchCadenceConfig();
+    return __cachedCadence;
+  }
+  window.addEventListener('outreach:refresh', () => { __cachedCadence = null; });
+
+  function renderSequenceSection(parcel, data, cadence) {
+    const el = document.createElement('div');
+    el.className = 'detail-section';
+    const seq = data.sequence || {};
+
+    if (!seq.anchor_date) {
+      // Parcel hasn't entered cadence — show a "Start cadence" prompt
+      el.innerHTML = `
+        <h3>Sequence</h3>
+        <div style="font-size:12px; color:#8b949e;">
+          No outreach yet. Compose touch 1 to start the cadence.
+        </div>
+      `;
+      return el;
+    }
+
+    const completed = {};
+    (data.outreach || []).forEach(r => {
+      if (r.touch_number != null) completed[r.touch_number] = r;
+    });
+
+    const rows = cadence.sequence.map(t => {
+      const done = completed[t.touch];
+      const isNext = seq.next_due && seq.next_due.touch === t.touch;
+      let status = 'future';
+      if (done) status = 'done';
+      else if (isNext) status = 'current';
+
+      const targetDate = anchorPlus(seq.anchor_date, t.day_offset);
+      const reqMissing = isNext && seq.next_due && !seq.next_due.available;
+      return `
+        <div class="seq-row seq-row-${status}">
+          <span class="seq-icon">${status === 'done' ? '✓' : (status === 'current' ? '●' : '○')}</span>
+          <span class="seq-num">${t.touch}</span>
+          <span class="seq-channel">${t.channel}</span>
+          <span class="seq-date">${done ? `sent ${(done.sent_date || '').slice(0,10)}` : `due ${targetDate}`}</span>
+          ${reqMissing ? '<span class="seq-req-missing">(no ' + escapeHtml(t.requires) + ')</span>' : ''}
+        </div>
+      `;
+    }).join('');
+
+    const pausedBadge = seq.is_paused
+      ? '<span class="seq-paused-badge">paused</span>' : '';
+    const eosBadge = seq.is_end_of_sequence
+      ? '<span class="seq-eos-badge">Sequence complete</span>' : '';
+
+    el.innerHTML = `
+      <h3>Sequence — Touch ${seq.current_touch || 0} of ${cadence.sequence.length} ${pausedBadge} ${eosBadge}</h3>
+      <div class="seq-rows">${rows}</div>
+    `;
+    return el;
+  }
+
+  function anchorPlus(anchorIso, days) {
+    const d = new Date(anchorIso + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
   }
 
   // ---------- Public API ----------
@@ -259,9 +386,9 @@
     // Snapshot the panel's render serial at call time. If a newer render
     // bumps it before our fetch returns, we're stale — bail without appending.
     const serial = panel.dataset.renderSerial;
-    let data;
+    let data, cadence;
     try {
-      data = await fetchOutreach(parcel.pin);
+      [data, cadence] = await Promise.all([fetchOutreach(parcel.pin), getCadenceConfig()]);
     } catch (_) {
       if (panel.dataset.renderSerial !== serial) return;
       const err = document.createElement('div');
@@ -271,7 +398,8 @@
       return;
     }
     if (panel.dataset.renderSerial !== serial) return;
-    panel.appendChild(renderStageSection(parcel));
+    panel.appendChild(renderStageSection(parcel, data));
+    panel.appendChild(renderSequenceSection(parcel, data, cadence));
     panel.appendChild(renderContactSection(parcel, data));
     panel.appendChild(renderHistorySection(parcel, data));
   }
@@ -288,6 +416,143 @@
 
   // Expose to detail.js
   window.__outreachRenderSections = renderOutreachSections;
+
+  // ---------- Due Today banner ----------
+
+  async function fetchDue() {
+    const resp = await fetch('/api/outreach/due');
+    if (!resp.ok) throw new Error(`fetch due failed: ${resp.status}`);
+    return resp.json();
+  }
+
+  function channelEmoji(channel) {
+    return {email: '✉', phone: '☎', mail: '✉', end_of_sequence: '✓'}[channel] || '';
+  }
+
+  function channelLabel(channel, count) {
+    const noun = {
+      email: count === 1 ? 'email' : 'emails',
+      phone: count === 1 ? 'phone call' : 'phone calls',
+      mail:  count === 1 ? 'letter' : 'letters',
+      end_of_sequence: count === 1 ? 'ready to retire' : 'ready to retire',
+    }[channel] || channel;
+    return `${count} ${noun}`;
+  }
+
+  async function renderDueToday() {
+    const bar = document.getElementById('due-today-bar');
+    if (!bar) return;
+    let data;
+    try { data = await fetchDue(); } catch (_) { return; }
+    const groups = data.groups || [];
+    if (groups.length === 0) {
+      bar.hidden = true;
+      bar.innerHTML = '<span class="due-today-label">DUE TODAY</span>'
+        + '<span id="due-today-chips" class="due-today-chips"></span>';
+      return;
+    }
+    bar.hidden = false;
+    const chipsEl = bar.querySelector('#due-today-chips');
+    chipsEl.innerHTML = '';
+    groups.forEach(g => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'due-today-chip due-today-chip-' + g.channel;
+      chip.dataset.channel = g.channel;
+      chip.textContent = `${channelEmoji(g.channel)} ${channelLabel(g.channel, g.count)}`;
+      chip.addEventListener('click', () => toggleChipDropdown(chip, g));
+      chipsEl.appendChild(chip);
+    });
+  }
+
+  function toggleChipDropdown(chip, group) {
+    // Close any existing dropdown
+    const existing = document.getElementById('due-today-dropdown');
+    if (existing) {
+      existing.remove();
+      if (existing.dataset.forChannel === group.channel) return; // re-click = close
+    }
+    const dropdown = document.createElement('div');
+    dropdown.id = 'due-today-dropdown';
+    dropdown.className = 'due-today-dropdown';
+    dropdown.dataset.forChannel = group.channel;
+    dropdown.innerHTML = group.items.map(it => {
+      const overdue = it.days_overdue > 0
+        ? `<span class="due-today-overdue">+${it.days_overdue}d</span>` : '';
+      const subline = group.channel === 'end_of_sequence'
+        ? `Sequence complete · ${it.days_since_last}d since last touch`
+        : `Touch ${it.touch} · ${it.target_date}`;
+      return `
+        <button type="button" class="due-today-row" data-pin="${escapeHtml(it.pin)}">
+          <div class="due-today-row-main">
+            <strong>${escapeHtml(it.address || it.pin)}</strong>
+            <span class="due-today-row-owner">${escapeHtml(it.owner_first_name || '')}</span>
+          </div>
+          <div class="due-today-row-sub">${escapeHtml(subline)} ${overdue}</div>
+        </button>
+      `;
+    }).join('');
+    dropdown.querySelectorAll('[data-pin]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const pin = btn.dataset.pin;
+        dropdown.remove();
+        window.dispatchEvent(new CustomEvent('parcelselect', { detail: { pin } }));
+      });
+    });
+    // Position below the chip
+    const rect = chip.getBoundingClientRect();
+    dropdown.style.position = 'fixed';
+    dropdown.style.top = (rect.bottom + 4) + 'px';
+    dropdown.style.left = rect.left + 'px';
+    document.body.appendChild(dropdown);
+    // Click-outside to close
+    setTimeout(() => {
+      document.addEventListener('click', function onDoc(e) {
+        if (!dropdown.contains(e.target) && e.target !== chip) {
+          dropdown.remove();
+          document.removeEventListener('click', onDoc);
+        }
+      });
+    }, 0);
+  }
+
+  // Render on page load + whenever an outreach refresh fires
+  window.addEventListener('DOMContentLoaded', () => { renderDueToday(); });
+  window.addEventListener('outreach:refresh', () => { renderDueToday(); });
+
+  window.__outreachRenderDueToday = renderDueToday;
+
+  async function fetchDigestHealth() {
+    const resp = await fetch('/api/health/digest');
+    if (!resp.ok) return null;
+    return resp.json();
+  }
+
+  async function renderDigestHealthBadge() {
+    const bar = document.getElementById('due-today-bar');
+    if (!bar) return;
+    let health;
+    try { health = await fetchDigestHealth(); } catch (_) { return; }
+    if (!health) return;
+    // Remove existing badge if present
+    const existing = bar.querySelector('.digest-health-badge');
+    if (existing) existing.remove();
+    if (!health.stale) return;  // healthy → no badge
+    const badge = document.createElement('span');
+    badge.className = 'digest-health-badge';
+    badge.title = health.last_run
+      ? `Last digest run: ${health.last_run}`
+      : 'Digest has never run';
+    badge.textContent = health.last_run
+      ? '⚠ Digest stale'
+      : '⚠ Digest not running';
+    bar.appendChild(badge);
+    // Show the bar even if Due Today is empty when the digest is unhealthy
+    bar.hidden = false;
+  }
+
+  window.addEventListener('DOMContentLoaded', () => { renderDigestHealthBadge(); });
+  window.addEventListener('outreach:refresh', () => { renderDigestHealthBadge(); });
 
   // ---------- Compose modal ----------
 
@@ -315,7 +580,8 @@
     if (m) m.remove();
   }
 
-  async function openComposeModal(parcel, contact, senderAddress) {
+  async function openComposeModal(parcel, contact, senderAddress, touchNumber) {
+    touchNumber = touchNumber || 1;
     // Fetch templates with rendered preview for this pin.
     let tplResp;
     try { tplResp = await fetchTemplates(parcel.pin); }
@@ -385,7 +651,32 @@
       subjectInput.value = t.rendered_subject || t.subject || '';
       bodyInput.value = t.rendered_body || t.body || '';
     }
-    applyTemplate(0);
+    // Default to the cadence template for this touch if it's in the list.
+    let cadenceCfg = null;
+    try { cadenceCfg = await getCadenceConfig(); } catch (_) {}
+    const cadenceTouch = cadenceCfg && cadenceCfg.sequence
+      ? cadenceCfg.sequence.find(t => t.touch === touchNumber) : null;
+    let defaultIdx = 0;
+    if (cadenceTouch) {
+      const idx = templates.findIndex(t => t.name === cadenceTouch.template);
+      if (idx < 0) {
+        // Cadence references a template that doesn't exist in
+        // outreach_templates.yaml. Falling back to the first template,
+        // but surface the gap so the user knows something's wrong.
+        console.warn(
+          'Cadence references template', cadenceTouch.template,
+          'which is not in outreach_templates.yaml. Falling back to first.'
+        );
+        showToast(
+          `Template "${cadenceTouch.template}" missing — using fallback`,
+          'error',
+        );
+      } else {
+        defaultIdx = idx;
+      }
+    }
+    tplSelect.value = String(defaultIdx);
+    applyTemplate(defaultIdx);
     tplSelect.addEventListener('change', () => applyTemplate(parseInt(tplSelect.value, 10)));
 
     function currentTemplateName() {
@@ -419,7 +710,10 @@
       if (!subject) { errSpan.textContent = 'subject required'; return; }
       sendBtn.disabled = true; sendBtn.textContent = 'Sending…';
       try {
-        await sendOutreach({ pin: parcel.pin, to, subject, body });
+        await sendOutreach({
+          pin: parcel.pin, to, subject, body,
+          touch_number: touchNumber,
+        });
         onClose();
         showToast('Email sent', 'success');
         window.dispatchEvent(new CustomEvent('outreach:refresh',
@@ -483,6 +777,135 @@
         saveBtn.disabled = false; saveBtn.textContent = 'Save template';
       }
     });
+  }
+
+  async function fetchTemplateRendered(pin, templateName) {
+    const resp = await fetch(`/api/outreach/templates?pin=${encodeURIComponent(pin)}`);
+    if (!resp.ok) throw new Error('fetch templates failed');
+    const data = await resp.json();
+    return (data.templates || []).find(t => t.name === templateName);
+  }
+
+  async function logManualTouch(payload) {
+    const resp = await fetch('/api/outreach/log-manual-touch', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+  }
+
+  function buildManualModal(title, bodyText, channel, parcel, touchNumber, scriptLabel) {
+    const root = document.createElement('div');
+    root.id = 'outreach-modal-root';
+    root.className = 'outreach-modal-backdrop';
+    root.innerHTML = `
+      <div class="outreach-modal" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">
+        <div class="outreach-modal-head">
+          <h3>${escapeHtml(title)}</h3>
+          <button type="button" class="btn btn-sm" id="manual-modal-close">Close</button>
+        </div>
+        <div class="outreach-modal-body">
+          <div class="cm-row">
+            <label class="cm-label">${escapeHtml(scriptLabel)}</label>
+            <textarea readonly class="manual-template-text">${escapeHtml(bodyText)}</textarea>
+          </div>
+          <div class="cm-row">
+            <label class="cm-label" for="manual-notes">Notes (optional)</label>
+            <textarea id="manual-notes" placeholder="What happened on this touch?"></textarea>
+          </div>
+        </div>
+        <div class="outreach-modal-foot">
+          <span class="outreach-modal-error" id="manual-error"></span>
+          <button type="button" class="btn" id="manual-copy-btn">Copy to clipboard</button>
+          <button type="button" class="btn" id="manual-skip-btn" title="Mark this touch as skipped, no action taken">Skip touch</button>
+          <button type="button" class="btn btn-primary" id="manual-complete-btn">Mark complete</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(root);
+
+    function onKey(ev) { if (ev.key === 'Escape') onClose(); }
+    function onClose() {
+      document.removeEventListener('keydown', onKey);
+      root.remove();
+    }
+    document.addEventListener('keydown', onKey);
+    root.querySelector('#manual-modal-close').addEventListener('click', onClose);
+    root.addEventListener('click', e => { if (e.target === root) onClose(); });
+
+    root.querySelector('#manual-copy-btn').addEventListener('click', () => {
+      navigator.clipboard.writeText(bodyText).then(
+        () => showToast('Copied to clipboard', 'success'),
+        () => showToast("Couldn't copy", 'error'),
+      );
+    });
+
+    const completeBtn = root.querySelector('#manual-complete-btn');
+    const skipBtn = root.querySelector('#manual-skip-btn');
+    const errSpan = root.querySelector('#manual-error');
+
+    async function submit(actualChannel, successLabel) {
+      const notes = root.querySelector('#manual-notes').value;
+      errSpan.textContent = '';
+      completeBtn.disabled = true; skipBtn.disabled = true;
+      try {
+        await logManualTouch({
+          pin: parcel.pin, touch_number: touchNumber,
+          channel: actualChannel, notes,
+        });
+        onClose();
+        showToast(successLabel, 'success');
+        window.dispatchEvent(new CustomEvent('outreach:refresh',
+                                              { detail: { pin: parcel.pin } }));
+      } catch (e) {
+        errSpan.textContent = e.message || 'save failed';
+        completeBtn.disabled = false; skipBtn.disabled = false;
+      }
+    }
+
+    completeBtn.addEventListener('click',
+      () => submit(channel, `Touch ${touchNumber} logged`));
+    skipBtn.addEventListener('click',
+      () => submit('skipped', `Touch ${touchNumber} skipped`));
+  }
+
+  async function openPhoneModal(parcel, contact, touchNumber) {
+    const cadenceCfg = await getCadenceConfig();
+    const touch = cadenceCfg.sequence.find(t => t.touch === touchNumber);
+    if (!touch) { showToast('No cadence config for that touch', 'error'); return; }
+    let tpl;
+    try { tpl = await fetchTemplateRendered(parcel.pin, touch.template); }
+    catch (_) { showToast("Couldn't load phone template", 'error'); return; }
+    const body = (tpl && (tpl.rendered_body || tpl.body)) || '';
+    const phone = (contact && contact.phone) || 'no phone on file';
+    buildManualModal(
+      `Phone call — touch ${touchNumber} of ${cadenceCfg.sequence.length} · ${phone}`,
+      body,
+      'phone', parcel, touchNumber,
+      'Script (conversational, not verbatim)',
+    );
+  }
+
+  async function openMailModal(parcel, touchNumber) {
+    const cadenceCfg = await getCadenceConfig();
+    const touch = cadenceCfg.sequence.find(t => t.touch === touchNumber);
+    if (!touch) { showToast('No cadence config for that touch', 'error'); return; }
+    let tpl;
+    try { tpl = await fetchTemplateRendered(parcel.pin, touch.template); }
+    catch (_) { showToast("Couldn't load mail template", 'error'); return; }
+    const body = (tpl && (tpl.rendered_body || tpl.body)) || '';
+    const channelLabel = touchNumber === 6 ? 'Postcard' : 'Letter';
+    buildManualModal(
+      `${channelLabel} — touch ${touchNumber} of ${cadenceCfg.sequence.length}`,
+      body,
+      'mail', parcel, touchNumber,
+      `${channelLabel} body (copy + print + mail manually for now)`,
+    );
   }
 
   // Wire the compose button trigger from renderContactSection.

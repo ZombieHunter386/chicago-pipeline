@@ -1,6 +1,7 @@
 # tests/test_db.py
 import sqlite3
 from pathlib import Path
+import pytest
 from pipeline.db import init_db, get_connection, upsert_rows
 
 
@@ -207,3 +208,72 @@ def test_consolidation_groups_has_score_columns(tmp_path):
         conn.close()
     assert "score" in cols
     assert "score_version" in cols
+
+
+def test_init_db_creates_outreach_paused_column(tmp_path):
+    """init_db should add an outreach_paused column to parcels (via the
+    _LATER_COLUMNS migration). Defaults to 0 — the cadence query relies
+    on `WHERE outreach_paused = 0` for existing parcels, so a NULL default
+    would silently exclude them."""
+    from pipeline.db import init_db
+    import sqlite3
+    p = tmp_path / "t.db"
+    init_db(p)
+    conn = sqlite3.connect(p)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(parcels)")}
+    assert "outreach_paused" in cols
+    # Verify the declared default — pragma_table_info returns the literal
+    # SQL default text, so DEFAULT 0 shows as the string "0".
+    default_val = conn.execute(
+        "SELECT dflt_value FROM pragma_table_info('parcels') WHERE name='outreach_paused'"
+    ).fetchone()[0]
+    assert default_val == "0", f"expected default 0, got {default_val!r}"
+    conn.close()
+
+
+def test_init_db_creates_outreach_gmail_message_id_column(tmp_path):
+    """init_db should add a gmail_message_id column to outreach. Replaces
+    the prior 'shove it into notes' hack — clean column with one purpose."""
+    from pipeline.db import init_db
+    import sqlite3
+    p = tmp_path / "t.db"
+    init_db(p)
+    conn = sqlite3.connect(p)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(outreach)")}
+    assert "gmail_message_id" in cols
+    conn.close()
+
+
+def test_init_db_creates_outreach_unique_touch_index(tmp_path):
+    """init_db should create a partial unique index on outreach(pin, touch_number)
+    so two rows with the same (pin, touch_number) can't coexist."""
+    from pipeline.db import init_db
+    import sqlite3
+    p = tmp_path / "t.db"
+    init_db(p)
+    conn = sqlite3.connect(p)
+    # Insert a parcel + first outreach row
+    conn.execute("INSERT INTO parcels (pin) VALUES (?)", ("14210010010000",))
+    conn.execute(
+        "INSERT INTO outreach (pin, touch_number, sent_date) VALUES (?, ?, ?)",
+        ("14210010010000", 1, "2026-05-15T09:00:00Z"),
+    )
+    conn.commit()
+    # Attempting a duplicate (same pin, same touch) must fail
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO outreach (pin, touch_number, sent_date) VALUES (?, ?, ?)",
+            ("14210010010000", 1, "2026-05-15T10:00:00Z"),
+        )
+        conn.commit()
+    # But a different touch_number is fine
+    conn.execute(
+        "INSERT INTO outreach (pin, touch_number, sent_date) VALUES (?, ?, ?)",
+        ("14210010010000", 2, "2026-05-18T09:00:00Z"),
+    )
+    conn.commit()
+    # And NULL touch_number rows can repeat (partial index)
+    conn.execute("INSERT INTO outreach (pin) VALUES (?)", ("14210010010000",))
+    conn.execute("INSERT INTO outreach (pin) VALUES (?)", ("14210010010000",))
+    conn.commit()
+    conn.close()

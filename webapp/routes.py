@@ -2,7 +2,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from flask import Flask, abort, current_app, jsonify, redirect, render_template, request, url_for
@@ -11,6 +11,7 @@ from werkzeug.exceptions import HTTPException
 from googleapiclient.errors import HttpError
 
 from pipeline import outreach as outreach_module, gmail_client
+from pipeline import cadence as cadence_module
 from webapp.filter_schema import build_filter_schema
 from webapp.parcel_query import (
     ALLOWED_CATEGORIES,
@@ -409,6 +410,16 @@ def register(app: Flask) -> None:
                 Path(app.config["OUTREACH_TEMPLATES_PATH"])
             )
 
+        def _today():
+            """Returns the current date via the injected clock. Tests
+            override app.config["CLOCK"] to a fixed lambda."""
+            return app.config["CLOCK"]()
+
+        def _load_cadence():
+            return cadence_module.load_cadence_config(
+                Path(app.config["OUTREACH_CADENCE_PATH"])
+            )
+
         def _parcel_or_404(conn, pin: str):
             if not pin.isdigit() or len(pin) != 14:
                 abort(404)
@@ -422,19 +433,65 @@ def register(app: Flask) -> None:
         @app.get("/api/parcels/<pin>/outreach")
         def api_parcel_outreach(pin: str):
             with closing(_conn()) as conn:
-                _parcel_or_404(conn, pin)
+                parcel = _parcel_or_404(conn, pin)
                 contact = conn.execute(
                     "SELECT * FROM contacts WHERE pin = ? LIMIT 1", (pin,)
                 ).fetchone()
                 outreach_rows = outreach_module.list_outreach_for_parcel(conn, pin)
+                outreach_dicts = [dict(r) for r in outreach_rows]
+
+            # Compute sequence state
+            cadence = _load_cadence()
+            today = _today()
+            by_touch = {
+                r["touch_number"]: r for r in outreach_dicts
+                if r.get("touch_number") is not None
+            }
+            anchor_row = by_touch.get(1)
+            anchor_date = (
+                anchor_row["sent_date"][:10]
+                if anchor_row and anchor_row.get("sent_date") else None
+            )
+            current_touch = max(by_touch.keys()) if by_touch else 0
+            is_paused = bool(parcel.get("outreach_paused"))
+            is_eos = cadence_module.is_end_of_sequence(
+                cadence_config=cadence, outreach_rows=outreach_dicts, today=today,
+            )
+
+            next_due = None
+            if not is_paused:
+                due_list = cadence_module.next_due_touches_for_parcel(
+                    cadence_config=cadence,
+                    outreach_rows=outreach_dicts,
+                    contact=dict(contact) if contact else None,
+                    parcel_mail_address=parcel.get("mail_address"),
+                    today=today,
+                )
+                if due_list:
+                    n = due_list[0]
+                    next_due = {
+                        "touch": n["touch"],
+                        "channel": n["channel"],
+                        "target_date": n["target_date"],
+                        "days_overdue": n["days_overdue"],
+                        "available": True,
+                    }
+
             return jsonify({
                 "pin": pin,
                 "contact": dict(contact) if contact else None,
-                "outreach": [dict(r) for r in outreach_rows],
+                "outreach": outreach_dicts,
                 "gmail_connected": gmail_client.is_connected(
                     Path(app.config["GMAIL_TOKEN_PATH"])
                 ),
                 "sender_address": app.config.get("GMAIL_SENDER_ADDRESS") or "",
+                "sequence": {
+                    "anchor_date": anchor_date,
+                    "current_touch": current_touch,
+                    "next_due": next_due,
+                    "is_end_of_sequence": is_eos,
+                    "is_paused": is_paused,
+                },
             })
 
         @app.get("/api/outreach/templates")
@@ -491,6 +548,145 @@ def register(app: Flask) -> None:
                 abort(500, f"failed to save template: {e}")
             return jsonify({"template": saved})
 
+        @app.get("/api/outreach/due")
+        def api_outreach_due():
+            cadence = _load_cadence()
+            with closing(_conn()) as conn:
+                return jsonify(
+                    cadence_module.all_due_touches(conn, cadence, _today())
+                )
+
+        @app.get("/api/cadence/config")
+        def api_cadence_config():
+            return jsonify(_load_cadence())
+
+        @app.get("/api/health/digest")
+        def api_health_digest():
+            """Returns the last-known-good timestamp of the daily digest
+            cron + a stale flag. Used by the UI to warn when the digest
+            hasn't fired (Mac was off, cron is broken, etc.). When the
+            config has no sentinel path set (e.g., in tests with no
+            override), reports as not-configured rather than crashing."""
+            raw = app.config.get("DUE_DIGEST_LAST_RUN_PATH")
+            if raw is None:
+                return jsonify({"last_run": None, "stale": True,
+                                "reason": "not configured"})
+            p = Path(raw)
+            if not p.exists():
+                return jsonify({"last_run": None, "stale": True,
+                                "reason": "no sentinel file yet"})
+            try:
+                ts_text = p.read_text().strip()
+                ts = datetime.fromisoformat(ts_text.replace("Z", "+00:00"))
+            except (ValueError, OSError):
+                return jsonify({"last_run": None, "stale": True,
+                                "reason": "unparseable sentinel"})
+            stale = (datetime.now(timezone.utc) - ts) > timedelta(hours=25)
+            return jsonify({"last_run": ts_text, "stale": stale})
+
+        @app.post("/api/outreach/log-manual-touch")
+        def api_outreach_log_manual_touch():
+            data = request.get_json(silent=True) or {}
+            pin = data.get("pin") or ""
+            touch_number = data.get("touch_number")
+            channel = data.get("channel")
+            notes = data.get("notes") or ""
+            if not pin.isdigit() or len(pin) != 14:
+                abort(400, "invalid pin")
+            if not isinstance(touch_number, int):
+                abort(400, "touch_number must be an integer")
+            if channel not in ("phone", "mail", "skipped"):
+                abort(400, "channel must be 'phone', 'mail', or 'skipped'")
+
+            cadence = _load_cadence()
+            tpl = next(
+                (t for t in cadence["sequence"] if t["touch"] == touch_number),
+                None,
+            )
+            if tpl is None:
+                abort(400, f"unknown touch_number {touch_number}")
+            # 'skipped' is always allowed regardless of the cadence's configured
+            # channel for this touch — the user chose not to do it.
+            if channel != "skipped" and tpl["channel"] != channel:
+                abort(
+                    400,
+                    f"touch {touch_number} channel is "
+                    f"{tpl['channel']!r}, not {channel!r}",
+                )
+
+            with closing(_conn()) as conn:
+                _parcel_or_404(conn, pin)
+                outreach_rows = [
+                    dict(r) for r in conn.execute(
+                        "SELECT * FROM outreach WHERE pin = ? "
+                        "ORDER BY touch_number",
+                        (pin,),
+                    )
+                ]
+                try:
+                    outreach_module.validate_next_due_touch(
+                        outreach_rows=outreach_rows,
+                        touch_number=touch_number,
+                    )
+                except ValueError as e:
+                    abort(400, str(e))
+                try:
+                    oid = outreach_module.create_outreach_record(
+                        conn, pin=pin, contact_id=None,
+                        channel=channel, subject="",
+                        body=notes,
+                        sent_date=_now_iso(),
+                        touch_number=touch_number,
+                    )
+                except sqlite3.IntegrityError:
+                    abort(409, "touch already completed")
+                if notes:
+                    # create_outreach_record writes body into draft_body+final_body,
+                    # not the dedicated notes column — separate UPDATE to keep
+                    # the helper signature clean.
+                    conn.execute(
+                        "UPDATE outreach SET notes = ? WHERE outreach_id = ?",
+                        (notes, oid),
+                    )
+                    conn.commit()
+                # Compute next due so the UI can update without a refetch.
+                outreach_rows.append({
+                    "touch_number": touch_number,
+                    "sent_date": _now_iso(),
+                })
+                contact_row = conn.execute(
+                    "SELECT * FROM contacts WHERE pin = ? LIMIT 1", (pin,)
+                ).fetchone()
+                contact = dict(contact_row) if contact_row else None
+                parcel_row = conn.execute(
+                    "SELECT mail_address FROM parcels WHERE pin = ?", (pin,)
+                ).fetchone()
+                due = cadence_module.next_due_touches_for_parcel(
+                    cadence_config=cadence,
+                    outreach_rows=outreach_rows,
+                    contact=contact,
+                    parcel_mail_address=parcel_row["mail_address"],
+                    today=_today(),
+                )
+                next_touch = due[0] if due else None
+
+            return jsonify({"outreach_id": oid, "next_touch": next_touch})
+
+        @app.post("/api/parcels/<pin>/pause")
+        def api_parcel_pause(pin: str):
+            data = request.get_json(silent=True) or {}
+            paused = bool(data.get("paused"))
+            if not pin.isdigit() or len(pin) != 14:
+                abort(400, "invalid pin")
+            with closing(_conn()) as conn:
+                _parcel_or_404(conn, pin)
+                conn.execute(
+                    "UPDATE parcels SET outreach_paused = ? WHERE pin = ?",
+                    (1 if paused else 0, pin),
+                )
+                conn.commit()
+            return jsonify({"pin": pin, "paused": paused})
+
         @app.post("/api/contacts/upsert")
         def api_contacts_upsert():
             data = request.get_json(silent=True) or {}
@@ -522,6 +718,9 @@ def register(app: Flask) -> None:
             to = data.get("to") or ""
             subject = data.get("subject")
             body = data.get("body")
+            touch_number = data.get("touch_number", 1)
+            if not isinstance(touch_number, int) or touch_number < 1:
+                abort(400, "touch_number must be a positive integer")
             if not pin.isdigit() or len(pin) != 14:
                 abort(400, "invalid pin")
             if not EMAIL_RE.match(to):
@@ -536,6 +735,22 @@ def register(app: Flask) -> None:
 
             with closing(_conn()) as conn:
                 _parcel_or_404(conn, pin)
+                # Validate the touch_number is next-due for this parcel.
+                outreach_rows = [
+                    dict(r) for r in conn.execute(
+                        "SELECT * FROM outreach WHERE pin = ? "
+                        "ORDER BY touch_number",
+                        (pin,),
+                    )
+                ]
+                try:
+                    outreach_module.validate_next_due_touch(
+                        outreach_rows=outreach_rows,
+                        touch_number=touch_number,
+                    )
+                except ValueError as e:
+                    abort(400, str(e))
+
                 cid = outreach_module.upsert_contact(
                     conn, pin=pin, email=to, source="manual"
                 )
@@ -553,16 +768,19 @@ def register(app: Flask) -> None:
                     # Surface a 503 with the actual reason so the UI can show it.
                     abort(503, f"Gmail API error: {e}")
 
-                oid = outreach_module.create_outreach_record(
-                    conn, pin=pin, contact_id=cid,
-                    channel="email", subject=subject, body=body,
-                    sent_date=_now_iso(),
-                )
-                # Persist the Gmail message id in `notes` (cheap; avoids a
-                # schema change to add a dedicated column).
+                try:
+                    oid = outreach_module.create_outreach_record(
+                        conn, pin=pin, contact_id=cid,
+                        channel="email", subject=subject, body=body,
+                        sent_date=_now_iso(),
+                        touch_number=touch_number,
+                    )
+                except sqlite3.IntegrityError:
+                    abort(409, "touch already completed (race detected)")
+                # Persist the Gmail message id in its dedicated column.
                 conn.execute(
-                    "UPDATE outreach SET notes = ? WHERE outreach_id = ?",
-                    (f"gmail_message_id={result.get('id','')}", oid),
+                    "UPDATE outreach SET gmail_message_id = ? WHERE outreach_id = ?",
+                    (result.get("id", ""), oid),
                 )
                 # Auto-transition: scored → outreach on first successful send.
                 conn.execute(
