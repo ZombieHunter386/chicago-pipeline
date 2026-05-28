@@ -7,20 +7,20 @@
   <string>com.chicagopipeline.bouncepoller</string>
   <key>ProgramArguments</key>
   <array>
-    <string>{{PROJECT_ROOT}}/.venv/bin/python</string>
+    <string>__PROJECT_DIR__/.venv/bin/python</string>
     <string>-m</string>
     <string>pipeline.bounce_poller</string>
     <string>--db</string>
-    <string>{{PROJECT_ROOT}}/data/smoke.db</string>
+    <string>__PROJECT_DIR__/data/full.alt.db</string>
   </array>
   <key>StartInterval</key>
   <integer>3600</integer>
   <key>RunAtLoad</key>
   <true/>
   <key>StandardOutPath</key>
-  <string>{{PROJECT_ROOT}}/data/bounce_poller.log</string>
+  <string>__PROJECT_DIR__/data/bounce_poller.log</string>
   <key>StandardErrorPath</key>
-  <string>{{PROJECT_ROOT}}/data/bounce_poller.err.log</string>
+  <string>__PROJECT_DIR__/data/bounce_poller.err.log</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
