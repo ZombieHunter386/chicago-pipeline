@@ -227,3 +227,16 @@ This dumps just the `outreach`, `contacts`, and `waves` tables to a timestamped 
 ### Digest observability
 
 The daily digest writes a sentinel file (`data/due_digest_last_run.txt`) on every run (including empty-day runs). The UI surfaces a "⚠ Digest stale" badge in the Due Today bar when the sentinel is older than 25 hours, or absent. Check `data/due_digest.log` for the underlying error.
+
+### Bounce poller (auto-flips dead addresses)
+
+Runs hourly via launchd. Parses Gmail mailer-daemon bouncebacks and marks matching
+contact rows as `dead`. Install once:
+
+```bash
+./scripts/install_bounce_poller_launchd.sh
+```
+
+Logs: `data/bounce_poller.log`. Uninstall: `launchctl unload ~/Library/LaunchAgents/com.chicagopipeline.bouncepoller.plist`.
+
+**IMPORTANT — OAuth scope re-consent required:** The bounce poller needs `gmail.readonly` permission in addition to the existing `gmail.send`. After pulling this code, visit `http://127.0.0.1:5051/api/oauth/start` (with the webapp running) to re-grant both scopes. Without this, the poller will fail with a 403 from Gmail and contacts won't get flipped on bounce.

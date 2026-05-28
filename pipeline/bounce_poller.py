@@ -135,3 +135,20 @@ def poll_once(
         "messages_processed": len(messages),
         "addresses_flipped": total_flipped,
     }
+
+
+def _main():
+    import argparse, os
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--db", type=Path, required=True)
+    args = parser.parse_args()
+    token_path = Path(os.environ.get("GMAIL_TOKEN_PATH", "data/gmail_token.json"))
+    result = poll_once(db_path=args.db, gmail_token_path=token_path)
+    print(f"Bounce poll: {result['messages_processed']} messages, "
+          f"{result['addresses_flipped']} addresses flipped dead")
+
+
+if __name__ == "__main__":
+    _main()
