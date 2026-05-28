@@ -33,6 +33,20 @@ def outreach_db_path(tmp_path: Path) -> Path:
     return path
 
 
+def _seed_alive_contact(db_path: Path, pin: str, email: str) -> None:
+    """T10: /api/outreach/send now validates every recipient is an alive
+    contact for the pin. Send-route tests use this helper to seed the
+    addresses they post — preserves the empty-contacts default for the
+    detail-endpoint tests that need it."""
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "INSERT INTO contacts (pin, email, source) VALUES (?, ?, ?)",
+        (pin, email, "manual"),
+    )
+    conn.commit()
+    conn.close()
+
+
 @pytest.fixture
 def templates_path(tmp_path: Path) -> Path:
     p = tmp_path / "templates.yaml"
@@ -158,6 +172,35 @@ def test_upsert_contact_rejects_null_pin(app_on) -> None:
     assert resp.status_code == 400
 
 
+def test_post_contact_update_replaces_email_in_place(
+    app_on, outreach_db_path: Path,
+) -> None:
+    """The Edit button calls /api/contacts/<cid>/update to overwrite a
+    specific row's value without going through upsert semantics (which
+    would dedupe by pin+value and create a new row)."""
+    _seed_alive_contact(outreach_db_path, "14210010010000", "old@x.com")
+    conn = sqlite3.connect(outreach_db_path)
+    cid = conn.execute(
+        "SELECT contact_id FROM contacts WHERE pin = ? AND email = ?",
+        ("14210010010000", "old@x.com"),
+    ).fetchone()[0]
+    conn.close()
+
+    client = app_on.test_client()
+    resp = client.post(
+        f"/api/contacts/{cid}/update",
+        json={"email": "new@x.com"},
+    )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+
+    conn = sqlite3.connect(outreach_db_path)
+    row = conn.execute(
+        "SELECT email FROM contacts WHERE contact_id = ?", (cid,)
+    ).fetchone()
+    conn.close()
+    assert row[0] == "new@x.com"
+
+
 def test_send_outreach_rejects_null_pin_and_to(app_on) -> None:
     """JSON null on pin or `to` should land as 400, not 500."""
     client = app_on.test_client()
@@ -251,7 +294,8 @@ def test_save_template_404_when_flag_off(app_off) -> None:
 
 # ---------- POST /api/outreach/send ----------
 
-def test_send_outreach_calls_gmail_and_records_row(app_on) -> None:
+def test_send_outreach_calls_gmail_and_records_row(app_on, outreach_db_path) -> None:
+    _seed_alive_contact(outreach_db_path, "14210010010000", "js@example.com")
     client = app_on.test_client()
     with patch("webapp.routes.gmail_client.send_email") as send_mock:
         send_mock.return_value = {"id": "msg-1", "threadId": "thr-1"}
@@ -268,15 +312,19 @@ def test_send_outreach_calls_gmail_and_records_row(app_on) -> None:
     data = resp.get_json()
     assert data["outreach_id"] >= 1
     assert data["gmail_message_id"] == "msg-1"
-    # Send was called with sanitized subject and the right addresses
+    # Send was called with sanitized subject and the right addresses.
+    # T10: BCC fanout — the visible To: header is the sender; actual
+    # recipient(s) ride in bcc.
     assert send_mock.call_count == 1
     kwargs = send_mock.call_args.kwargs
     assert kwargs["sender"] == "me@example.com"
-    assert kwargs["to"] == "js@example.com"
+    assert kwargs["to"] == "me@example.com"
+    assert kwargs["bcc"] == ["js@example.com"]
     assert kwargs["subject"] == "Hi"
 
 
 def test_send_outreach_flips_stage_to_outreach(app_on, outreach_db_path: Path) -> None:
+    _seed_alive_contact(outreach_db_path, "14210010010000", "x@y.com")
     client = app_on.test_client()
     with patch("webapp.routes.gmail_client.send_email") as send_mock:
         send_mock.return_value = {"id": "m", "threadId": "t"}
@@ -292,7 +340,8 @@ def test_send_outreach_flips_stage_to_outreach(app_on, outreach_db_path: Path) -
     assert stage == "outreach"
 
 
-def test_send_outreach_sanitizes_subject(app_on) -> None:
+def test_send_outreach_sanitizes_subject(app_on, outreach_db_path) -> None:
+    _seed_alive_contact(outreach_db_path, "14210010010000", "x@y.com")
     client = app_on.test_client()
     with patch("webapp.routes.gmail_client.send_email") as send_mock:
         send_mock.return_value = {"id": "m", "threadId": "t"}
@@ -303,7 +352,8 @@ def test_send_outreach_sanitizes_subject(app_on) -> None:
     assert send_mock.call_args.kwargs["subject"] == "HiBcc: evil@x.com"
 
 
-def test_send_outreach_surfaces_gmail_error(app_on) -> None:
+def test_send_outreach_surfaces_gmail_error(app_on, outreach_db_path) -> None:
+    _seed_alive_contact(outreach_db_path, "14210010010000", "x@y.com")
     from pipeline.gmail_client import GmailNotConnectedError
     client = app_on.test_client()
     with patch("webapp.routes.gmail_client.send_email") as send_mock:
@@ -316,9 +366,10 @@ def test_send_outreach_surfaces_gmail_error(app_on) -> None:
     assert "not connected" in resp.get_data(as_text=True).lower()
 
 
-def test_send_outreach_surfaces_gmail_http_error(app_on) -> None:
+def test_send_outreach_surfaces_gmail_http_error(app_on, outreach_db_path) -> None:
     """Gmail API quota / 5xx / forbidden — surface as 503 with the API reason
     so the UI can show something actionable instead of a generic 500."""
+    _seed_alive_contact(outreach_db_path, "14210010010000", "x@y.com")
     from googleapiclient.errors import HttpError
     client = app_on.test_client()
     # Build a minimal HttpError. The googleapiclient constructor expects a
@@ -350,6 +401,7 @@ def test_send_outreach_rejects_missing_fields(app_on) -> None:
 # ---------- POST /api/outreach/<id>/mark-replied ----------
 
 def test_mark_replied_updates_row(app_on, outreach_db_path: Path) -> None:
+    _seed_alive_contact(outreach_db_path, "14210010010000", "x@y.com")
     client = app_on.test_client()
     with patch("webapp.routes.gmail_client.send_email") as send_mock:
         send_mock.return_value = {"id": "m", "threadId": "t"}
@@ -429,6 +481,7 @@ def test_oauth_start_404s_when_client_secrets_missing(app_on) -> None:
 
 def test_send_outreach_accepts_touch_number(app_on, outreach_db_path):
     """Send with touch_number=2 records the outreach row with that touch."""
+    _seed_alive_contact(outreach_db_path, "14210010010000", "x@y.com")
     import sqlite3
     conn = sqlite3.connect(outreach_db_path)
     conn.execute(
@@ -470,6 +523,7 @@ def test_send_persists_gmail_message_id_to_dedicated_column(app_on, outreach_db_
     """The send route writes the Gmail message id to its dedicated column,
     NOT polluting the notes field. Replaces the prior 'gmail_message_id=X'
     string-in-notes hack."""
+    _seed_alive_contact(outreach_db_path, "14210010010000", "x@y.com")
     import sqlite3
     with patch("webapp.routes.gmail_client.send_email") as send_mock:
         send_mock.return_value = {"id": "msg-abc-123", "threadId": "thr-1"}
@@ -492,6 +546,7 @@ def test_send_persists_gmail_message_id_to_dedicated_column(app_on, outreach_db_
 
 def test_send_outreach_defaults_touch_number_to_1(app_on, outreach_db_path):
     """Backward-compat: omitting touch_number sends touch 1."""
+    _seed_alive_contact(outreach_db_path, "14210010010000", "x@y.com")
     with patch("webapp.routes.gmail_client.send_email") as send_mock:
         send_mock.return_value = {"id": "m", "threadId": "t"}
         resp = app_on.test_client().post("/api/outreach/send", json={

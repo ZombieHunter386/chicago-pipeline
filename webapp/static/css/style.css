@@ -549,3 +549,56 @@
 #manual-notes {
   min-height: 80px;
 }
+
+/* ===== Multi-row contact UI (T11) ===== */
+.contacts-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.contact-row {
+  display: grid;
+  grid-template-columns: 24px 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.contact-row-dead { opacity: 0.5; text-decoration: line-through; }
+.contact-row-wrong { opacity: 0.5; background: #2d1f1f; }
+
+.contact-icon { font-size: 14px; color: #8b949e; }
+.contact-value { font-weight: 500; }
+.contact-meta { color: #8b949e; font-size: 11px; }
+.contact-related { color: #58a6ff; }
+.contact-tag {
+  font-size: 10px; padding: 2px 6px; background: #21262d;
+  border-radius: 3px; color: #8b949e;
+}
+
+.contacts-actions {
+  display: flex; gap: 8px; margin-top: 6px;
+}
+
+#bulk-trace-progress {
+  display: flex; gap: 8px; align-items: center; margin: 8px 0;
+}
+.bulk-trace-bar {
+  width: 200px; height: 6px; background: #21262d; border-radius: 3px; overflow: hidden;
+}
+#bulk-trace-fill {
+  height: 100%; background: #58a6ff; width: 0; transition: width 0.3s;
+}
+.bulk-trace-label { font-size: 12px; color: #8b949e; }
+.bcc-checkbox-list {
+  display: flex; flex-direction: column; gap: 4px;
+  border: 1px solid #30363d; border-radius: 4px; padding: 8px;
+  max-height: 200px; overflow-y: auto;
+}
+.bcc-checkbox { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.bcc-meta { color: #8b949e; font-size: 11px; margin-left: auto; }

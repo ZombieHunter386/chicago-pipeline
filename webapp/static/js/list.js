@@ -325,3 +325,60 @@
     return el;
   }
 })();
+
+// Bulk-trace top 20: kicks off /api/enrichment/bulk for the first 20 visible
+// parcels (groups skipped — they don't carry a single PIN), then polls the job
+// status every 2s and updates an inline progress bar. On completion the page
+// reloads so the newly-fetched contacts populate the detail panels.
+(function () {
+  const btn = document.getElementById('bulk-trace-btn');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    const visibleRows = document.querySelectorAll('#parcel-list [data-pin]');
+    const pins = Array.from(visibleRows).slice(0, 20).map(r => r.dataset.pin);
+    if (pins.length === 0) {
+      alert('No parcels in current view'); return;
+    }
+    const estCost = (pins.length * 0.10).toFixed(2);
+    if (!confirm(`Trace top ${pins.length} parcels (est. $${estCost})? Parcels with existing contacts are skipped.`)) return;
+
+    const r = await fetch('/api/enrichment/bulk', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({pins}),
+    });
+    if (!r.ok) { alert('Bulk trace failed to start'); return; }
+    const {job_id} = await r.json();
+    pollProgress(job_id, pins.length);
+  });
+
+  async function pollProgress(jobId, total) {
+    const prog = document.getElementById('bulk-trace-progress');
+    const done = document.getElementById('bulk-trace-done');
+    const totalEl = document.getElementById('bulk-trace-total');
+    const fill = document.getElementById('bulk-trace-fill');
+    prog.hidden = false;
+    totalEl.textContent = total;
+    while (true) {
+      await new Promise(r => setTimeout(r, 2000));
+      const r = await fetch(`/api/enrichment/job/${jobId}`);
+      const data = await r.json();
+      const doneCount = (data.pins || []).filter(p =>
+        p.status === 'done' || p.status === 'skipped' || p.status === 'error').length;
+      done.textContent = doneCount;
+      fill.style.width = `${(doneCount / total * 100).toFixed(1)}%`;
+      if (data.status === 'complete') {
+        setTimeout(() => { prog.hidden = true; window.location.reload(); }, 1500);
+        break;
+      }
+      if (data.status === 'paused') {
+        alert(`Bulk trace paused: ${data.paused_reason}`);
+        break;
+      }
+      if (data.status === 'failed') {
+        alert('Bulk trace failed');
+        break;
+      }
+    }
+  }
+})();

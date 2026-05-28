@@ -117,15 +117,42 @@ def test_upsert_contact_inserts_new(db: sqlite3.Connection) -> None:
     assert row["source"] == "manual"
 
 
-def test_upsert_contact_updates_existing(db: sqlite3.Connection) -> None:
+def test_upsert_contact_with_same_pin_different_emails_creates_two_rows(
+    db: sqlite3.Connection,
+) -> None:
+    """Multi-contact-per-pin: two different emails for one pin yield two rows.
+    Before this fix, the second call clobbered the first because upsert
+    looked up existing rows by pin alone."""
     cid1 = upsert_contact(db, pin="14210010010000", email="old@example.com")
     cid2 = upsert_contact(db, pin="14210010010000", email="new@example.com")
-    assert cid1 == cid2  # same row, updated in place
+    assert cid1 != cid2  # separate rows
+    n = db.execute("SELECT COUNT(*) FROM contacts WHERE pin = ?",
+                   ("14210010010000",)).fetchone()[0]
+    assert n == 2
+    emails = {
+        r["email"] for r in db.execute(
+            "SELECT email FROM contacts WHERE pin = ?", ("14210010010000",)
+        ).fetchall()
+    }
+    assert emails == {"old@example.com", "new@example.com"}
+
+
+def test_upsert_contact_with_same_pin_same_email_updates_in_place(
+    db: sqlite3.Connection,
+) -> None:
+    """Same (pin, email) means same row — update the other fields, don't
+    insert a duplicate."""
+    cid1 = upsert_contact(db, pin="14210010010000",
+                          email="a@x.com", name="Alice")
+    cid2 = upsert_contact(db, pin="14210010010000",
+                          email="a@x.com", name="Alice Updated")
+    assert cid1 == cid2
     n = db.execute("SELECT COUNT(*) FROM contacts WHERE pin = ?",
                    ("14210010010000",)).fetchone()[0]
     assert n == 1
-    row = db.execute("SELECT * FROM contacts WHERE contact_id = ?", (cid1,)).fetchone()
-    assert row["email"] == "new@example.com"
+    row = db.execute("SELECT * FROM contacts WHERE contact_id = ?",
+                     (cid1,)).fetchone()
+    assert row["name"] == "Alice Updated"
 
 
 def test_upsert_contact_preserves_unset_fields(db: sqlite3.Connection) -> None:

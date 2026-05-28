@@ -53,6 +53,26 @@ def create_app(
     # their own path explicitly. Avoids relative-path test pollution.
     app.config["DUE_DIGEST_LAST_RUN_PATH"] = due_digest_last_run_path
 
+    # Enrichment provider wiring — reads config/enrichment.yaml + env for the
+    # provider API keys, hands the constructed providers to the routes via
+    # app.config so tests can inject stubs.
+    import yaml
+    enrichment_cfg_path = Path("config/enrichment.yaml")
+    if enrichment_cfg_path.exists() and feature_outreach:
+        enrichment_cfg = yaml.safe_load(enrichment_cfg_path.read_text())
+        app.config["ENRICHMENT_CFG"] = enrichment_cfg
+        import os
+        tracerfy_key = os.environ.get("TRACERFY_API_KEY")
+        if tracerfy_key:
+            from pipeline.enrichment_providers.tracerfy import TracerfyProvider
+            app.config["ENRICHMENT_SKIP_PROVIDER"] = TracerfyProvider(api_key=tracerfy_key)
+        from pipeline.enrichment import BudgetCap
+        budget_cfg = enrichment_cfg.get("budget", {})
+        app.config["ENRICHMENT_BUDGET"] = BudgetCap(
+            soft_daily_usd=float(budget_cfg.get("soft_daily_usd", 5.00)),
+            hard_per_run_usd=float(budget_cfg.get("hard_per_run_usd", 2.50)),
+        )
+
     from webapp import routes
     routes.register(app)
 

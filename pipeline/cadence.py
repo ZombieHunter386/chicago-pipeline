@@ -69,28 +69,12 @@ def _parse_iso_date(s: str) -> date:
     return date.fromisoformat(s[:10])
 
 
-def _contact_has(
-    contact: dict | None,
-    parcel_mail_address: str | None,
-    field: str,
-) -> bool:
-    """True iff the named contact field is non-empty.
-
-    mail_address comes from the parcel (assessor data, always present in
-    practice); email/phone come from the contact row.
-    """
-    if field == "mail_address":
-        return bool(parcel_mail_address)
-    if not contact:
-        return False
-    return bool(contact.get(field))
-
-
 def next_due_touches_for_parcel(
     *,
     cadence_config: dict,
     outreach_rows: list[dict],
-    contact: dict | None,
+    contact: dict | None = None,        # backwards-compat, single contact row
+    contacts: list[dict] | None = None, # new: multiple rows (Task 3)
     parcel_mail_address: str | None,
     today: date,
 ) -> list[dict]:
@@ -104,10 +88,29 @@ def next_due_touches_for_parcel(
       - skip if target_date > today (not yet due)
       - skip if `requires` field not satisfied
 
+    Accepts either `contact` (single row, legacy callers) or `contacts` (list
+    of rows, post–enrichment-rewrite callers). At least one alive email row is
+    required to satisfy requires='email'; same for phone. Dead rows (dead=1 or
+    wrong_person=1) are filtered out before the requires check via
+    alive_emails_for_parcel / alive_phones_for_parcel.
+
     Each returned item is the touch config dict augmented with:
       target_date  (ISO date string)
       days_overdue (int, 0 if due today, positive if past)
     """
+    if contacts is None:
+        contacts = [contact] if contact else []
+
+    # Function-level import to avoid a top-of-module cycle: enrichment.py may
+    # eventually import cadence pieces, and cadence already imports outreach
+    # in all_due_touches the same way.
+    from pipeline.enrichment import (
+        alive_emails_for_parcel,
+        alive_phones_for_parcel,
+    )
+    has_email = bool(alive_emails_for_parcel(contacts))
+    has_phone = bool(alive_phones_for_parcel(contacts))
+
     by_touch = {
         r["touch_number"]: r
         for r in outreach_rows
@@ -125,8 +128,16 @@ def next_due_touches_for_parcel(
         target = anchor + timedelta(days=tpl["day_offset"])
         if target > today:
             continue
-        if not _contact_has(contact, parcel_mail_address, tpl["requires"]):
-            continue
+        requires = tpl["requires"]
+        if requires == "email":
+            if not has_email:
+                continue
+        elif requires == "phone":
+            if not has_phone:
+                continue
+        elif requires == "mail_address":
+            if not parcel_mail_address:
+                continue
         out.append({
             **tpl,
             "target_date": target.isoformat(),
@@ -181,12 +192,20 @@ def all_due_touches(conn, cadence_config: dict, today: date) -> dict:
 
     groups = {"email": [], "phone": [], "mail": [], "end_of_sequence": []}
 
+    # Function-level import: keeps the orchestrator self-contained at
+    # call-time and avoids paying for the import when only the pure helpers
+    # are used (tests import this module without enrichment available).
+    from pipeline.enrichment import (
+        alive_emails_for_parcel,
+        alive_phones_for_parcel,
+    )
+
     for p in rows:
         pin = p["pin"]
-        contact_row = conn.execute(
-            "SELECT * FROM contacts WHERE pin = ? LIMIT 1", (pin,)
-        ).fetchone()
-        contact = dict(contact_row) if contact_row else None
+        contact_rows = conn.execute(
+            "SELECT * FROM contacts WHERE pin = ?", (pin,)
+        ).fetchall()
+        contacts = [dict(r) for r in contact_rows]
         outreach_rows = [
             dict(r) for r in conn.execute(
                 "SELECT * FROM outreach WHERE pin = ? ORDER BY touch_number",
@@ -198,10 +217,12 @@ def all_due_touches(conn, cadence_config: dict, today: date) -> dict:
         due = next_due_touches_for_parcel(
             cadence_config=cadence_config,
             outreach_rows=outreach_rows,
-            contact=contact,
+            contacts=contacts,
             parcel_mail_address=p["mail_address"],
             today=today,
         )
+        alive_emails = alive_emails_for_parcel(contacts)
+        alive_phones = alive_phones_for_parcel(contacts)
         for d in due:
             item = {
                 "pin": pin,
@@ -214,10 +235,14 @@ def all_due_touches(conn, cadence_config: dict, today: date) -> dict:
                 "target_date": d["target_date"],
                 "days_overdue": d["days_overdue"],
             }
-            if d["channel"] == "email" and contact:
-                item["to_email"] = contact.get("email")
-            elif d["channel"] == "phone" and contact:
-                item["to_phone"] = contact.get("phone")
+            if d["channel"] == "email":
+                # First alive email = primary To: address. Downstream BCC
+                # fanout (T4) builds its own list from contacts at send time.
+                if alive_emails:
+                    item["to_email"] = alive_emails[0]
+            elif d["channel"] == "phone":
+                if alive_phones:
+                    item["to_phone"] = alive_phones[0]
             elif d["channel"] == "mail":
                 # Mail address always present from assessor data — populate the
                 # target so the digest and compose UI don't have to refetch.

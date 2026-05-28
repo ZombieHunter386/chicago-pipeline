@@ -94,98 +94,169 @@
   function renderContactSection(parcel, data) {
     const el = document.createElement('div');
     el.className = 'detail-section';
-    const contact = data.contact || {};
-    const email = contact.email || '';
-
+    const contacts = data.contacts || (data.contact ? [data.contact] : []);
     const gmailStatus = data.gmail_connected
       ? '<span class="outreach-gmail-status-connected">✓ Gmail connected</span>'
       : '<a href="/api/oauth/start" class="outreach-connect-link">Connect Gmail</a>';
 
+    const rowsHtml = contacts.map(c => renderContactRow(c)).join('') ||
+      '<div style="font-size:12px; color:#8b949e;">No contacts on file. Click Trace owner or Add manually.</div>';
+
     el.innerHTML = `
-      <h3>Contact</h3>
-      <div class="detail-grid" style="grid-template-columns: 1fr;">
-        <div class="detail-item">
-          <div class="label">Email</div>
-          <div class="value">
-            <input type="email" id="outreach-email-input"
-                   class="outreach-input"
-                   placeholder="owner@example.com"
-                   value="${escapeHtml(email)}" />
-          </div>
-        </div>
-        <div class="detail-item">
-          <div class="label">Owner (Assessor)</div>
-          <div class="value">${escapeHtml(parcel.owner_name || '—')}</div>
-        </div>
-        <div class="detail-item">
-          <div class="label">Mail address</div>
-          <div class="value">${escapeHtml(parcel.mail_address || '—')}</div>
-        </div>
-        <div class="detail-item">
-          <div class="value outreach-compose-row">
-            <button type="button" class="btn btn-primary" id="outreach-compose-btn"
-                    ${email ? '' : 'disabled'}
-                    title="${email ? '' : 'Add an email above first'}">
-              Compose email…
-            </button>
-            ${gmailStatus}
-          </div>
-        </div>
+      <h3>Contact <span class="outreach-gmail-status">${gmailStatus}</span></h3>
+      <div class="contacts-rows">${rowsHtml}</div>
+      <div class="contacts-actions">
+        <button type="button" class="btn btn-primary" id="trace-owner-btn">+ Trace owner</button>
+        <button type="button" class="btn" id="add-manual-btn">+ Add manually</button>
+        <button type="button" class="btn btn-primary" id="outreach-compose-btn"
+          title="${contacts.length ? '' : 'Add a contact first'}"
+          ${contacts.length ? '' : 'disabled'}>Compose ▸</button>
       </div>
     `;
 
-    const input = el.querySelector('#outreach-email-input');
-    let original = email;
-    input.addEventListener('blur', async () => {
-      const v = input.value.trim();
-      if (v === original) return;
-      if (v && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) {
-        showToast('Invalid email', 'error');
-        return;
-      }
-      try {
-        await upsertContact(parcel.pin, { email: v || null });
-        original = v;
-        showToast(v ? 'Email saved' : 'Email cleared', 'success');
-        window.dispatchEvent(new CustomEvent('outreach:refresh',
-                                              { detail: { pin: parcel.pin } }));
-      } catch (e) {
-        showToast("Couldn't save email", 'error');
-      }
+    el.querySelectorAll('[data-mark-dead]').forEach(b => {
+      b.addEventListener('click', () => markContactDead(b.dataset.markDead, parcel.pin));
     });
-
-    const btn = el.querySelector('#outreach-compose-btn');
-    btn.addEventListener('click', async () => {
-      const liveEmail = input.value.trim();
-      const liveContact = liveEmail
-        ? Object.assign({}, data.contact || {}, { email: liveEmail })
-        : data.contact;
-      const nextDue = data.sequence && data.sequence.next_due;
-      const channel = nextDue ? nextDue.channel : 'email';
-      const touchNum = nextDue ? nextDue.touch : 1;
-
-      if (channel === 'email') {
-        if (typeof window.__outreachOpenCompose === 'function') {
-          window.__outreachOpenCompose(
-            parcel, liveContact, data.sender_address, touchNum,
-          );
-        }
-      } else if (channel === 'phone') {
-        await openPhoneModal(parcel, liveContact, touchNum);
-      } else if (channel === 'mail') {
-        await openMailModal(parcel, touchNum);
-      }
+    el.querySelectorAll('[data-mark-wrong]').forEach(b => {
+      b.addEventListener('click', () => markContactWrong(b.dataset.markWrong, parcel.pin));
     });
-
-    // Enable Compose live as the user types, so the first click after entering
-    // an email doesn't land on a still-disabled button (the blur-save round
-    // trip is async and was racing the click).
-    input.addEventListener('input', () => {
-      const hasEmail = !!input.value.trim();
-      btn.disabled = !hasEmail;
-      btn.title = hasEmail ? '' : 'Add an email above first';
+    el.querySelectorAll('[data-edit]').forEach(b => {
+      b.addEventListener('click', () => editContact(
+        b.dataset.edit, b.dataset.editKind, b.dataset.editCurrent, parcel.pin
+      ));
     });
+    el.querySelector('#trace-owner-btn').addEventListener('click', () => traceOwner(parcel.pin));
+    el.querySelector('#add-manual-btn').addEventListener('click', () => openAddManual(parcel.pin));
+    el.querySelector('#outreach-compose-btn').addEventListener('click', () =>
+      openComposeForNextDue(parcel, data));
     return el;
+  }
+
+  // Turn a per-contact source_label like 'tracerfy:email:rank-1' or
+  // 'tracerfy:Mobile:rank-2' into a human-readable meta line. Falls back
+  // to the raw value if there's no ':' (e.g. legacy 'manual' rows).
+  function humanizeSourceLabel(raw) {
+    if (!raw) return '';
+    if (!raw.includes(':')) return raw;
+    const parts = raw.split(':');
+    const provider = parts[0];
+    const rankToken = parts.slice(1).find(p => p.startsWith('rank-'));
+    const other = parts.slice(1).filter(p =>
+      p && p !== 'email' && p !== rankToken && !p.startsWith('via='));
+    const rankBit = rankToken ? rankToken.replace('rank-', 'rank ') : '';
+    return [rankBit, provider, ...other].filter(Boolean).join(' · ');
+  }
+
+  function renderContactRow(c) {
+    const kindIcon = c.email ? '✉' : '☎';
+    const value = c.email || c.phone;
+    const meta = c.confidence_pct != null
+      ? `${c.confidence_pct}% · ${c.enrichment_source || ''}`
+      : humanizeSourceLabel(c.enrichment_source || c.source || '');
+    const related = c.related_person_name
+      ? ` <span class="contact-related">via ${escapeHtml(c.related_person_name)}</span>` : '';
+    const dead = c.dead ? ' contact-row-dead' : '';
+    const wrong = c.wrong_person ? ' contact-row-wrong' : '';
+    const kind = c.email ? 'email' : 'phone';
+    return `
+      <div class="contact-row${dead}${wrong}">
+        <span class="contact-icon">${kindIcon}</span>
+        <span class="contact-value">${escapeHtml(value || '')}</span>
+        <span class="contact-meta">${escapeHtml(meta)}${related}</span>
+        <div class="contact-actions">
+          <button type="button" class="btn btn-sm" data-edit="${c.contact_id}" data-edit-kind="${kind}" data-edit-current="${escapeHtml(value || '')}">Edit</button>
+          ${c.dead ? '<span class="contact-tag">dead</span>' :
+            `<button type="button" class="btn btn-sm" data-mark-dead="${c.contact_id}">Mark dead</button>`}
+          ${c.wrong_person ? '<span class="contact-tag">wrong</span>' :
+            `<button type="button" class="btn btn-sm" data-mark-wrong="${c.contact_id}">Wrong person</button>`}
+        </div>
+      </div>
+    `;
+  }
+
+  async function markContactDead(cid, pin) {
+    try {
+      const r = await fetch(`/api/contacts/${cid}/dead`, {method: 'POST'});
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      showToast('Marked dead', 'success');
+      window.dispatchEvent(new CustomEvent('outreach:refresh', {detail: {pin}}));
+    } catch (_) { showToast("Couldn't mark dead", 'error'); }
+  }
+
+  async function markContactWrong(cid, pin) {
+    try {
+      const r = await fetch(`/api/contacts/${cid}/wrong-person`, {method: 'POST'});
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      showToast('Marked wrong person', 'success');
+      window.dispatchEvent(new CustomEvent('outreach:refresh', {detail: {pin}}));
+    } catch (_) { showToast("Couldn't mark wrong person", 'error'); }
+  }
+
+  async function editContact(cid, kind, currentValue, pin) {
+    const newValue = prompt(`Edit ${kind}:`, currentValue);
+    if (newValue === null) return;  // user cancelled
+    const trimmed = newValue.trim();
+    if (!trimmed || trimmed === currentValue) return;  // no change
+    const body = kind === 'email' ? {email: trimmed} : {phone: trimmed};
+    try {
+      const r = await fetch(`/api/contacts/${cid}/update`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      showToast(`${kind} updated`, 'success');
+      window.dispatchEvent(new CustomEvent('outreach:refresh', {detail: {pin}}));
+    } catch (e) { showToast(`Couldn't update ${kind}`, 'error'); }
+  }
+
+  async function traceOwner(pin) {
+    try {
+      const r = await fetch(`/api/enrichment/lookup/${pin}`, {method: 'POST'});
+      if (!r.ok) {
+        const text = await r.text();
+        throw new Error(text);
+      }
+      showToast('Trace complete', 'success');
+      window.dispatchEvent(new CustomEvent('outreach:refresh', {detail: {pin}}));
+    } catch (e) {
+      showToast(`Trace failed: ${e.message}`, 'error');
+    }
+  }
+
+  function openAddManual(pin) {
+    const value = prompt("Email or phone to add (manual entry):");
+    if (!value || !value.trim()) return;
+    const isEmail = value.includes('@');
+    const body = isEmail
+      ? {pin, email: value.trim(), source: 'manual'}
+      : {pin, phone: value.trim(), source: 'manual'};
+    fetch('/api/contacts/upsert', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    }).then(r => {
+      if (!r.ok) throw new Error('save failed');
+      showToast('Added', 'success');
+      window.dispatchEvent(new CustomEvent('outreach:refresh', {detail: {pin}}));
+    }).catch(_ => showToast("Couldn't add", 'error'));
+  }
+
+  function openComposeForNextDue(parcel, data) {
+    const nextDue = data.sequence && data.sequence.next_due;
+    if (!nextDue) { showToast('No touch is currently due', 'info'); return; }
+    const touchNum = nextDue.touch;
+    const channel = nextDue.channel;
+    if (channel === 'email') {
+      window.__outreachOpenCompose(parcel, data.contacts || [],
+                                    data.sender_address, touchNum);
+    } else if (channel === 'phone') {
+      const phoneContact = (data.contacts || []).find(c =>
+        c.phone && !c.dead && !c.wrong_person) || {};
+      openPhoneModal(parcel, phoneContact, touchNum);
+    } else if (channel === 'mail') {
+      openMailModal(parcel, touchNum);
+    }
   }
 
   // ---------- History section ----------
@@ -580,8 +651,15 @@
     if (m) m.remove();
   }
 
-  async function openComposeModal(parcel, contact, senderAddress, touchNumber) {
+  async function openComposeModal(parcel, contacts, senderAddress, touchNumber) {
     touchNumber = touchNumber || 1;
+    // Filter to alive emails only — dead/wrong-person addresses are excluded.
+    const aliveEmails = (contacts || []).filter(c =>
+      c.email && !c.dead && !c.wrong_person);
+    if (aliveEmails.length === 0) {
+      alert("No alive email addresses for this parcel. Add a contact or run a trace first.");
+      return;
+    }
     // Fetch templates with rendered preview for this pin.
     let tplResp;
     try { tplResp = await fetchTemplates(parcel.pin); }
@@ -617,8 +695,20 @@
             <input type="text" id="cm-from" value="${escapeHtml(senderAddress || '')}" disabled />
           </div>
           <div class="cm-row">
-            <label class="cm-label" for="cm-to">To</label>
-            <input type="email" id="cm-to" value="${escapeHtml(contact && contact.email || '')}" />
+            <label class="cm-label">To (BCC, all checked by default)</label>
+            <div class="bcc-checkbox-list">
+              ${aliveEmails.map(c => `
+                <label class="bcc-checkbox">
+                  <input type="checkbox" data-bcc-email="${escapeHtml(c.email)}" checked>
+                  ${escapeHtml(c.email)}
+                  <span class="bcc-meta">${escapeHtml(
+                    c.confidence_pct != null
+                      ? c.confidence_pct + '% · ' + (c.enrichment_source || '')
+                      : humanizeSourceLabel(c.enrichment_source || c.source || '')
+                  )}</span>
+                </label>
+              `).join('')}
+            </div>
           </div>
           <div class="cm-row">
             <label class="cm-label" for="cm-subject">Subject</label>
@@ -700,18 +790,19 @@
     document.addEventListener('keydown', onKey);
 
     sendBtn.addEventListener('click', async () => {
-      const to = root.querySelector('#cm-to').value.trim();
+      const toList = Array.from(root.querySelectorAll('[data-bcc-email]:checked'))
+        .map(cb => cb.dataset.bccEmail);
       const subject = subjectInput.value.trim();
       const body = bodyInput.value;
       errSpan.textContent = '';
-      if (!to || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) {
-        errSpan.textContent = 'invalid recipient email'; return;
+      if (toList.length === 0) {
+        errSpan.textContent = 'check at least one recipient'; return;
       }
       if (!subject) { errSpan.textContent = 'subject required'; return; }
       sendBtn.disabled = true; sendBtn.textContent = 'Sending…';
       try {
         await sendOutreach({
-          pin: parcel.pin, to, subject, body,
+          pin: parcel.pin, to_list: toList, subject, body,
           touch_number: touchNumber,
         });
         onClose();

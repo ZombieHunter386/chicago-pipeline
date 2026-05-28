@@ -29,6 +29,15 @@
       <h2>Ranked Parcels</h2>
       <span class="count-label" id="count-label">— of —</span>
     </div>
+    {% if feature_outreach %}
+    <div class="bulk-trace-row" style="padding: 8px 16px; border-bottom:1px solid #30363d;">
+      <button type="button" id="bulk-trace-btn" class="btn btn-primary">⚡ Bulk trace top 20</button>
+      <div id="bulk-trace-progress" hidden>
+        <span class="bulk-trace-label">Tracing: <span id="bulk-trace-done">0</span> / <span id="bulk-trace-total">0</span></span>
+        <div class="bulk-trace-bar"><div id="bulk-trace-fill"></div></div>
+      </div>
+    </div>
+    {% endif %}
     <div class="filter-row" id="stage-pills"></div>
     <div class="search-row" style="padding: 8px 16px; border-bottom:1px solid #30363d;">
       <input type="search" id="address-search" placeholder="Search address…"

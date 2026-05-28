@@ -115,7 +115,14 @@ def upsert_contact(
     role: str | None = None,
     source: str | None = None,
 ) -> int:
-    """Upsert by pin (one contact row per pin in v1). Returns the contact_id.
+    """Upsert by (pin, email) if email supplied; by (pin, phone) if only phone
+    supplied; else by pin alone (legacy). Returns the contact_id.
+
+    Multi-contact-per-pin is supported as of T11: passing the same pin with a
+    DIFFERENT email creates a new row instead of clobbering. Passing the same
+    pin with the SAME email updates the other fields on the existing row.
+    The (pin,)-only fallback preserves backward compatibility for callers that
+    only ever supply name/role (e.g. early-pipeline scaffolding).
 
     Only non-None fields are written — passing email=None on an update preserves
     the existing email value. This matters because the UI may upsert just an
@@ -125,9 +132,20 @@ def upsert_contact(
     (the standard for this project — see webapp/routes.py:_conn and
     pipeline/db.py:get_connection).
     """
-    row = conn.execute(
-        "SELECT contact_id FROM contacts WHERE pin = ? LIMIT 1", (pin,)
-    ).fetchone()
+    if email is not None:
+        row = conn.execute(
+            "SELECT contact_id FROM contacts WHERE pin = ? AND email = ? LIMIT 1",
+            (pin, email),
+        ).fetchone()
+    elif phone is not None:
+        row = conn.execute(
+            "SELECT contact_id FROM contacts WHERE pin = ? AND phone = ? LIMIT 1",
+            (pin, phone),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT contact_id FROM contacts WHERE pin = ? LIMIT 1", (pin,)
+        ).fetchone()
     fields = {
         "email": email, "name": name, "phone": phone,
         "mailing_address": mailing_address, "role": role, "source": source,

@@ -523,6 +523,20 @@ _LATER_COLUMNS = {
     "raw_assessor_characteristics": (
         ("char_bldg_sf_sum", "REAL"),
     ),
+    # Skip-trace enrichment columns. dead/wrong_person are operator-set
+    # tombstones surfaced from bounce polling or manual review; the rest
+    # come from the enrichment provider (currently Tracerfy advanced mode).
+    # related_person_name lets a single parcel carry multiple persons from
+    # one advanced-mode lookup (officer/manager + owner, etc.).
+    "contacts": (
+        ("dead", "INTEGER DEFAULT 0"),
+        ("wrong_person", "INTEGER DEFAULT 0"),
+        ("confidence_pct", "INTEGER"),
+        ("enrichment_source", "TEXT"),
+        ("related_person_name", "TEXT"),
+        ("dead_at", "TEXT"),
+        ("dead_reason", "TEXT"),
+    ),
 }
 
 
@@ -530,6 +544,10 @@ def init_db(db_path: Path) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = get_connection(db_path)
     try:
+        # WAL lets the enrichment orchestrator (background thread) write
+        # while the Flask review UI reads without blocking. Persists on the
+        # DB file once set, but cheap to re-assert on every init.
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(SCHEMA_SQL)
         for table, columns in _LATER_COLUMNS.items():
             for col, sql_type in columns:
@@ -545,6 +563,76 @@ def init_db(db_path: Path) -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_outreach_pin_touch_unique "
             "ON outreach(pin, touch_number) WHERE touch_number IS NOT NULL"
         )
+        # ---- Skip-trace enrichment tables (Plan 2026-05-23) ----
+        # Order matters: enrichment_results FKs enrichment_jobs(id), so the
+        # jobs table is created first. Indexes on enrichment_results follow
+        # immediately after enrichment_results is defined.
+        # Batch job: a set of pins submitted to the enrichment orchestrator.
+        # pin_list_json holds the original input set so we can resume after
+        # restarts; per-pin progress lives in enrichment_job_pins.
+        # created_at/completed_at default to ISO-8601-with-Z to match the
+        # project convention (see pipeline/cadence.py, outreach code).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS enrichment_jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pin_list_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                paused_reason TEXT,
+                total_cost_usd REAL DEFAULT 0.0,
+                created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                completed_at TEXT
+            )
+        """)
+        # One row per provider call. raw_response_json preserved verbatim
+        # so we can backfill new fields without re-paying for lookups.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS enrichment_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pin TEXT NOT NULL,
+                job_id INTEGER,
+                provider TEXT NOT NULL,
+                lookup_type TEXT NOT NULL,
+                query_name TEXT NOT NULL,
+                query_mail_address TEXT,
+                raw_response_json TEXT NOT NULL,
+                cost_usd REAL NOT NULL,
+                status TEXT NOT NULL,
+                error_message TEXT,
+                created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                FOREIGN KEY(pin) REFERENCES parcels(pin),
+                FOREIGN KEY(job_id) REFERENCES enrichment_jobs(id)
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_enrichment_results_pin "
+            "ON enrichment_results(pin)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_enrichment_results_job "
+            "ON enrichment_results(job_id)"
+        )
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS enrichment_job_pins (
+                job_id INTEGER NOT NULL,
+                pin TEXT NOT NULL,
+                status TEXT NOT NULL,
+                error_message TEXT,
+                PRIMARY KEY (job_id, pin),
+                FOREIGN KEY(job_id) REFERENCES enrichment_jobs(id),
+                FOREIGN KEY(pin) REFERENCES parcels(pin)
+            )
+        """)
+        # Singleton row holding the Gmail bounce poller's resume cursor.
+        # CHECK (id = 1) makes the row-count invariant enforced by the DB,
+        # not just convention.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS bounce_poll_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                last_message_id TEXT,
+                last_polled_at TEXT
+            )
+        """)
+        conn.execute("INSERT OR IGNORE INTO bounce_poll_state(id) VALUES (1)")
         conn.commit()
     finally:
         conn.close()
