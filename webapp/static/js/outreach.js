@@ -135,10 +135,11 @@
     if (!raw.includes(':')) return raw;
     const parts = raw.split(':');
     const provider = parts[0];
-    const middle = parts.slice(1, -1).filter(p => p && p !== 'email');
-    const last = parts[parts.length - 1];
-    const rankBit = last.startsWith('rank-') ? last.replace('rank-', 'rank ') : last;
-    return [rankBit, provider, ...middle].filter(Boolean).join(' · ');
+    const rankToken = parts.slice(1).find(p => p.startsWith('rank-'));
+    const other = parts.slice(1).filter(p =>
+      p && p !== 'email' && p !== rankToken && !p.startsWith('via='));
+    const rankBit = rankToken ? rankToken.replace('rank-', 'rank ') : '';
+    return [rankBit, provider, ...other].filter(Boolean).join(' · ');
   }
 
   function renderContactRow(c) {
@@ -168,7 +169,8 @@
 
   async function markContactDead(cid, pin) {
     try {
-      await fetch(`/api/contacts/${cid}/dead`, {method: 'POST'});
+      const r = await fetch(`/api/contacts/${cid}/dead`, {method: 'POST'});
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
       showToast('Marked dead', 'success');
       window.dispatchEvent(new CustomEvent('outreach:refresh', {detail: {pin}}));
     } catch (_) { showToast("Couldn't mark dead", 'error'); }
@@ -176,7 +178,8 @@
 
   async function markContactWrong(cid, pin) {
     try {
-      await fetch(`/api/contacts/${cid}/wrong-person`, {method: 'POST'});
+      const r = await fetch(`/api/contacts/${cid}/wrong-person`, {method: 'POST'});
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
       showToast('Marked wrong person', 'success');
       window.dispatchEvent(new CustomEvent('outreach:refresh', {detail: {pin}}));
     } catch (_) { showToast("Couldn't mark wrong person", 'error'); }
@@ -223,7 +226,9 @@
       window.__outreachOpenCompose(parcel, data.contacts || [],
                                     data.sender_address, touchNum);
     } else if (channel === 'phone') {
-      openPhoneModal(parcel, data.contacts || [], touchNum);
+      const phoneContact = (data.contacts || []).find(c =>
+        c.phone && !c.dead && !c.wrong_person) || {};
+      openPhoneModal(parcel, phoneContact, touchNum);
     } else if (channel === 'mail') {
       openMailModal(parcel, touchNum);
     }
