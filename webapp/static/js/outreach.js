@@ -621,8 +621,15 @@
     if (m) m.remove();
   }
 
-  async function openComposeModal(parcel, contact, senderAddress, touchNumber) {
+  async function openComposeModal(parcel, contacts, senderAddress, touchNumber) {
     touchNumber = touchNumber || 1;
+    // Filter to alive emails only — dead/wrong-person addresses are excluded.
+    const aliveEmails = (contacts || []).filter(c =>
+      c.email && !c.dead && !c.wrong_person);
+    if (aliveEmails.length === 0) {
+      alert("No alive email addresses for this parcel. Add a contact or run a trace first.");
+      return;
+    }
     // Fetch templates with rendered preview for this pin.
     let tplResp;
     try { tplResp = await fetchTemplates(parcel.pin); }
@@ -658,8 +665,20 @@
             <input type="text" id="cm-from" value="${escapeHtml(senderAddress || '')}" disabled />
           </div>
           <div class="cm-row">
-            <label class="cm-label" for="cm-to">To</label>
-            <input type="email" id="cm-to" value="${escapeHtml(contact && contact.email || '')}" />
+            <label class="cm-label">To (BCC, all checked by default)</label>
+            <div class="bcc-checkbox-list">
+              ${aliveEmails.map(c => `
+                <label class="bcc-checkbox">
+                  <input type="checkbox" data-bcc-email="${escapeHtml(c.email)}" checked>
+                  ${escapeHtml(c.email)}
+                  <span class="bcc-meta">${escapeHtml(
+                    c.confidence_pct != null
+                      ? c.confidence_pct + '% · ' + (c.enrichment_source || '')
+                      : humanizeSourceLabel(c.enrichment_source || c.source || '')
+                  )}</span>
+                </label>
+              `).join('')}
+            </div>
           </div>
           <div class="cm-row">
             <label class="cm-label" for="cm-subject">Subject</label>
@@ -741,18 +760,19 @@
     document.addEventListener('keydown', onKey);
 
     sendBtn.addEventListener('click', async () => {
-      const to = root.querySelector('#cm-to').value.trim();
+      const toList = Array.from(root.querySelectorAll('[data-bcc-email]:checked'))
+        .map(cb => cb.dataset.bccEmail);
       const subject = subjectInput.value.trim();
       const body = bodyInput.value;
       errSpan.textContent = '';
-      if (!to || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) {
-        errSpan.textContent = 'invalid recipient email'; return;
+      if (toList.length === 0) {
+        errSpan.textContent = 'check at least one recipient'; return;
       }
       if (!subject) { errSpan.textContent = 'subject required'; return; }
       sendBtn.disabled = true; sendBtn.textContent = 'Sending…';
       try {
         await sendOutreach({
-          pin: parcel.pin, to, subject, body,
+          pin: parcel.pin, to_list: toList, subject, body,
           touch_number: touchNumber,
         });
         onClose();
