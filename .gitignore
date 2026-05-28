@@ -11,7 +11,10 @@ data/*.log
 venv/
 .DS_Store
 data/gmail_token.json
+data/gmail_token.json.*
 data/gmail_oauth_client.json
+data/*.prewalkthrough
+data/*.preconsent
 .env.local
 
 # Outreach backup dumps
