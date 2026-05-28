@@ -834,6 +834,38 @@ def register(app: Flask) -> None:
                 conn.commit()
             return jsonify({"ok": True})
 
+        @app.post("/api/contacts/<int:contact_id>/update")
+        def api_contact_update(contact_id: int):
+            """Update a specific contact row's email or phone value. Used by
+            the UI's Edit button to replace the value without going through
+            upsert semantics (which dedupe by pin+value and would create a
+            new row instead of editing in place)."""
+            data = request.get_json(silent=True) or {}
+            email = data.get("email")
+            phone = data.get("phone")
+            if email is None and phone is None:
+                abort(400, "email or phone is required")
+            if email is not None and not EMAIL_RE.match(email):
+                abort(400, "invalid email")
+            with closing(_conn()) as conn:
+                sets = []
+                params: list = []
+                if email is not None:
+                    sets.append("email = ?")
+                    params.append(email)
+                if phone is not None:
+                    sets.append("phone = ?")
+                    params.append(phone)
+                params.append(contact_id)
+                cur = conn.execute(
+                    f"UPDATE contacts SET {', '.join(sets)} WHERE contact_id = ?",
+                    params,
+                )
+                if cur.rowcount == 0:
+                    abort(404)
+                conn.commit()
+            return jsonify({"ok": True})
+
         @app.post("/api/outreach/send")
         def api_outreach_send():
             data = request.get_json(silent=True) or {}

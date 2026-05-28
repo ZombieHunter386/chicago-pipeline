@@ -172,6 +172,35 @@ def test_upsert_contact_rejects_null_pin(app_on) -> None:
     assert resp.status_code == 400
 
 
+def test_post_contact_update_replaces_email_in_place(
+    app_on, outreach_db_path: Path,
+) -> None:
+    """The Edit button calls /api/contacts/<cid>/update to overwrite a
+    specific row's value without going through upsert semantics (which
+    would dedupe by pin+value and create a new row)."""
+    _seed_alive_contact(outreach_db_path, "14210010010000", "old@x.com")
+    conn = sqlite3.connect(outreach_db_path)
+    cid = conn.execute(
+        "SELECT contact_id FROM contacts WHERE pin = ? AND email = ?",
+        ("14210010010000", "old@x.com"),
+    ).fetchone()[0]
+    conn.close()
+
+    client = app_on.test_client()
+    resp = client.post(
+        f"/api/contacts/{cid}/update",
+        json={"email": "new@x.com"},
+    )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+
+    conn = sqlite3.connect(outreach_db_path)
+    row = conn.execute(
+        "SELECT email FROM contacts WHERE contact_id = ?", (cid,)
+    ).fetchone()
+    conn.close()
+    assert row[0] == "new@x.com"
+
+
 def test_send_outreach_rejects_null_pin_and_to(app_on) -> None:
     """JSON null on pin or `to` should land as 400, not 500."""
     client = app_on.test_client()

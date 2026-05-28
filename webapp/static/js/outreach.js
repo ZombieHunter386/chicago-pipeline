@@ -120,6 +120,11 @@
     el.querySelectorAll('[data-mark-wrong]').forEach(b => {
       b.addEventListener('click', () => markContactWrong(b.dataset.markWrong, parcel.pin));
     });
+    el.querySelectorAll('[data-edit]').forEach(b => {
+      b.addEventListener('click', () => editContact(
+        b.dataset.edit, b.dataset.editKind, b.dataset.editCurrent, parcel.pin
+      ));
+    });
     el.querySelector('#trace-owner-btn').addEventListener('click', () => traceOwner(parcel.pin));
     el.querySelector('#add-manual-btn').addEventListener('click', () => openAddManual(parcel.pin));
     el.querySelector('#outreach-compose-btn').addEventListener('click', () =>
@@ -152,12 +157,14 @@
       ? ` <span class="contact-related">via ${escapeHtml(c.related_person_name)}</span>` : '';
     const dead = c.dead ? ' contact-row-dead' : '';
     const wrong = c.wrong_person ? ' contact-row-wrong' : '';
+    const kind = c.email ? 'email' : 'phone';
     return `
       <div class="contact-row${dead}${wrong}">
         <span class="contact-icon">${kindIcon}</span>
         <span class="contact-value">${escapeHtml(value || '')}</span>
         <span class="contact-meta">${escapeHtml(meta)}${related}</span>
         <div class="contact-actions">
+          <button type="button" class="btn btn-sm" data-edit="${c.contact_id}" data-edit-kind="${kind}" data-edit-current="${escapeHtml(value || '')}">Edit</button>
           ${c.dead ? '<span class="contact-tag">dead</span>' :
             `<button type="button" class="btn btn-sm" data-mark-dead="${c.contact_id}">Mark dead</button>`}
           ${c.wrong_person ? '<span class="contact-tag">wrong</span>' :
@@ -183,6 +190,24 @@
       showToast('Marked wrong person', 'success');
       window.dispatchEvent(new CustomEvent('outreach:refresh', {detail: {pin}}));
     } catch (_) { showToast("Couldn't mark wrong person", 'error'); }
+  }
+
+  async function editContact(cid, kind, currentValue, pin) {
+    const newValue = prompt(`Edit ${kind}:`, currentValue);
+    if (newValue === null) return;  // user cancelled
+    const trimmed = newValue.trim();
+    if (!trimmed || trimmed === currentValue) return;  // no change
+    const body = kind === 'email' ? {email: trimmed} : {phone: trimmed};
+    try {
+      const r = await fetch(`/api/contacts/${cid}/update`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      showToast(`${kind} updated`, 'success');
+      window.dispatchEvent(new CustomEvent('outreach:refresh', {detail: {pin}}));
+    } catch (e) { showToast(`Couldn't update ${kind}`, 'error'); }
   }
 
   async function traceOwner(pin) {
