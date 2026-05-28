@@ -240,3 +240,23 @@ contact rows as `dead`. Install once:
 Logs: `data/bounce_poller.log`. Uninstall: `launchctl unload ~/Library/LaunchAgents/com.chicagopipeline.bouncepoller.plist`.
 
 **IMPORTANT — OAuth scope re-consent required:** The bounce poller needs `gmail.readonly` permission in addition to the existing `gmail.send`. After pulling this code, visit `http://127.0.0.1:5051/api/oauth/start` (with the webapp running) to re-grant both scopes. Without this, the poller will fail with a 403 from Gmail and contacts won't get flipped on bounce.
+
+## Skip-trace enrichment
+
+The "Trace owner" button on the detail panel runs a skip-trace via Tracerfy's instant-lookup API (~$0.10/hit) and stores surfaced emails + phones as multiple `contacts` rows per parcel. The "Bulk trace top 20" button enriches the top 20 of the current filter view in a background job with per-pin checkpoint resume.
+
+Mode selection is automatic: parcels where `is_llc=0` use Tracerfy normal mode (supply first + last name); parcels where `is_llc=1` use Tracerfy advanced mode (address only — returns whoever's physically associated with the property). Both modes cost the same per hit, so the choice is purely about which has better data for the situation.
+
+### Required env
+
+```bash
+TRACERFY_API_KEY=...            # https://tracerfy.com — sign in → dashboard → API keys
+```
+
+After adding the key, visit `http://127.0.0.1:5051/api/oauth/start` to grant the `gmail.readonly` scope required by the bounce poller (in addition to the existing `gmail.send`). The poller will fail with 403 from Gmail until you re-consent.
+
+### Budget cap
+
+Configured in `config/enrichment.yaml`:
+- `soft_daily_usd` — UI confirmation prompt above this daily spend (override per-call with `?confirm=true`)
+- `hard_per_run_usd` — bulk jobs auto-pause above this per-run spend
