@@ -1,10 +1,14 @@
 from __future__ import annotations
+import sqlite3
 import pytest
+from pipeline.db import init_db
 from pipeline.enrichment import (
     split_owner_name,
     alive_emails_for_parcel,
     alive_phones_for_parcel,
     EnrichmentContact,
+    EnrichmentResult,
+    _enrich_one_pin,
 )
 
 
@@ -71,6 +75,51 @@ def test_budget_cap_soft_threshold(tmp_path):
         conn.commit()  # $4 spent
         assert cap.would_exceed_soft(conn, additional_cost=0.50) is False
         assert cap.would_exceed_soft(conn, additional_cost=2.00) is True
+
+
+class _RecordingProvider:
+    """Stub provider that captures every kwarg passed to lookup() so tests
+    can assert on the structured fields _enrich_one_pin chose to send."""
+    name = "stub"
+    cost_per_lookup_usd = 0.10
+
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    def lookup(self, **kwargs):
+        self.calls.append(kwargs)
+        return EnrichmentResult(
+            contacts=[], raw_response_json="{}", cost_usd=0.0,
+            provider=self.name, status="success", error_message=None,
+        )
+
+
+def test_enrich_one_pin_defaults_city_state_zip_for_chicago(tmp_path):
+    """Cook County assessor mail_address is street-only ('3550 N LAKE SHORE DR')
+    — no city/state/zip. _enrich_one_pin must hand the provider Chicago
+    defaults + the parcel's zip_code so Tracerfy's required-field check passes.
+    """
+    db = tmp_path / "t.db"
+    init_db(db)
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO parcels(pin, owner_name, mail_address, zip_code, is_llc) "
+            "VALUES ('14211110071178', 'John Morris', "
+            "'3550 N LAKE SHORE DR', '60657', 0)"
+        )
+        conn.commit()
+
+    provider = _RecordingProvider()
+    with sqlite3.connect(db) as conn:
+        conn.row_factory = sqlite3.Row
+        _enrich_one_pin(conn, job_id=None, pin="14211110071178",
+                        provider=provider)
+
+    assert len(provider.calls) == 1
+    call = provider.calls[0]
+    assert call.get("default_city") == "Chicago"
+    assert call.get("default_state") == "IL"
+    assert call.get("default_zip") == "60657"
 
 
 def test_budget_cap_hard_per_run(tmp_path):

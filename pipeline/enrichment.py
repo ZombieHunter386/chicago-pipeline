@@ -96,6 +96,9 @@ class EnrichmentProvider(Protocol):
         mail_address: str,
         owner_first_name: str | None = None,
         owner_last_name: str | None = None,
+        default_city: str = "",
+        default_state: str = "",
+        default_zip: str = "",
     ) -> EnrichmentResult:
         """Returns surfaced contacts for a parcel.
 
@@ -104,6 +107,11 @@ class EnrichmentProvider(Protocol):
         is empty/None, the provider falls through to advanced-mode
         address-only lookup. This lets the orchestrator pass through
         whatever it has without branching on mode itself.
+
+        default_city / default_state / default_zip fill in pieces the
+        provider can't extract from mail_address. The Cook County assessor
+        ships street-only strings, so the caller has to supply Chicago/IL
+        + the parcel's zip_code or Tracerfy 400s on the city field.
         """
         ...
 
@@ -264,14 +272,23 @@ def _enrich_one_pin(conn, job_id: int, pin: str,
     if parcel is None:
         raise ValueError(f"pin {pin} not in parcels table")
     mail = parcel["mail_address"]
+    # Cook County mail_address strings are usually street-only; the parser
+    # can't recover city/state/zip from them. Supply Chicago defaults plus
+    # the parcel's own zip_code so the provider has something to send.
+    defaults = dict(
+        default_city="Chicago",
+        default_state="IL",
+        default_zip=parcel["zip_code"] or "",
+    )
     if parcel["is_llc"]:
-        result = provider.lookup(mail_address=mail)
+        result = provider.lookup(mail_address=mail, **defaults)
         lookup_type = "skip_trace_advanced"
     else:
         first, last = split_owner_name(parcel["owner_name"] or "")
         result = provider.lookup(
             mail_address=mail,
             owner_first_name=first, owner_last_name=last,
+            **defaults,
         )
         lookup_type = "skip_trace_normal"
     _save_enrichment_result(

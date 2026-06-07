@@ -39,12 +39,14 @@ class StubSkipProvider:
     cost_per_lookup_usd = 0.10
     def __init__(self):
         self.calls = []
-    def lookup(self, *, mail_address, owner_first_name=None, owner_last_name=None):
+    def lookup(self, *, mail_address, owner_first_name=None,
+               owner_last_name=None, **_defaults):
         first = (owner_first_name or "").strip()
         last = (owner_last_name or "").strip()
         mode = "normal" if (first and last) else "advanced"
         self.calls.append({"mode": mode, "address": mail_address,
-                           "first": first, "last": last})
+                           "first": first, "last": last,
+                           "defaults": _defaults})
         person = f"{first} {last}".strip() or "Resident One"
         email = f"{person.lower().replace(' ', '.')}@x.com"
         return EnrichmentResult(

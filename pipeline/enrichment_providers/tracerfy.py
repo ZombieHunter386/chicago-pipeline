@@ -94,6 +94,9 @@ class TracerfyProvider:
         mail_address: str,
         owner_first_name: str | None = None,
         owner_last_name: str | None = None,
+        default_city: str = "",
+        default_state: str = "",
+        default_zip: str = "",
     ) -> EnrichmentResult:
         parsed = parse_mail_address(mail_address or "")
         first = (owner_first_name or "").strip()
@@ -103,9 +106,9 @@ class TracerfyProvider:
         use_advanced = not (first and last)
         body = {
             "address": parsed["address"],
-            "city": parsed["city"],
-            "state": parsed["state"] or "IL",
-            "zip": parsed["zip"],
+            "city": parsed["city"] or default_city,
+            "state": parsed["state"] or default_state,
+            "zip": parsed["zip"] or default_zip,
             "find_owner": use_advanced,
         }
         if not use_advanced:

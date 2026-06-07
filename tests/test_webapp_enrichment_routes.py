@@ -24,7 +24,7 @@ def app(tmp_path):
     class StubSkip:
         name = "stub"
         cost_per_lookup_usd = 0.10
-        def lookup(self, *, mail_address, owner_first_name=None, owner_last_name=None):
+        def lookup(self, **_kwargs):  # accepts default_city/state/zip etc
             return EnrichmentResult(
                 contacts=[EnrichmentContact(
                     value="john@x.com", kind="email",
