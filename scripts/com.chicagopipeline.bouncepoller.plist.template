@@ -13,6 +13,8 @@
     <string>--db</string>
     <string>__PROJECT_DIR__/data/full.alt.db</string>
   </array>
+  <key>WorkingDirectory</key>
+  <string>__PROJECT_DIR__</string>
   <key>StartInterval</key>
   <integer>3600</integer>
   <key>RunAtLoad</key>
