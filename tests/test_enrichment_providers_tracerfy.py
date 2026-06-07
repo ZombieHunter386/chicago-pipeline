@@ -204,6 +204,13 @@ def test_lookup_handles_500_error(monkeypatch):
      {"address": "655 W IRVING PARK RD", "city": "", "state": "", "zip": ""}),
     ("1806 N HALSTED ST",
      {"address": "1806 N HALSTED ST", "city": "", "state": "", "zip": ""}),
+    # Street numbers that happen to be 5 digits must not be mistaken for
+    # zip codes. The fix anchors zip extraction to end-of-string (or to
+    # input that has a structuring comma).
+    ("15774 S LAGRANGE RD",
+     {"address": "15774 S LAGRANGE RD", "city": "", "state": "", "zip": ""}),
+    ("12345 N CLARK ST",
+     {"address": "12345 N CLARK ST", "city": "", "state": "", "zip": ""}),
 ])
 def test_parse_mail_address(raw_addr, expected):
     assert parse_mail_address(raw_addr) == expected

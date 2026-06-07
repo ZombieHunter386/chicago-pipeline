@@ -29,7 +29,12 @@ from pipeline.enrichment import (
 TRACERFY_ENDPOINT = "https://tracerfy.com/v1/api/trace/lookup/"
 
 
-ZIP_RE = re.compile(r"\b(\d{5}(?:-\d{4})?)\b")
+# Zip must appear at the end of the string (after optional whitespace).
+# An unanchored \b(\d{5})\b would match a 5-digit street number at the
+# *start* of a string like "15774 S LAGRANGE RD" — catastrophic, since
+# the parser then strips it and leaves a mangled address. Real US mail
+# addresses always carry zip last, so anchoring to end is correct.
+ZIP_RE = re.compile(r"\b(\d{5}(?:-\d{4})?)\s*$")
 
 # Whitelist of US state codes (50 states + DC). The earlier bare \b[A-Z]{2}\b
 # regex falsely matched street-suffix abbreviations like DR/RD/ST/AVE/BLVD as
