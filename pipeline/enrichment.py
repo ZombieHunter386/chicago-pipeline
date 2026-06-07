@@ -27,10 +27,11 @@ def split_owner_name(raw: str) -> tuple[str, str]:
     """Split assessor `owner_name` into (first, last) for Tracerfy normal mode.
 
     Assessor names come in shouty caps and varied formats:
-      - 'JOHN SMITH'        → ('John', 'Smith')
-      - 'MARY ELLEN JONES'  → ('Mary', 'Ellen Jones')  (first token + rest)
-      - 'SMITH'             → ('', 'Smith')             (one token → last)
-      - 'SMITH JOHN TR'     → ('Smith', 'John Tr')      (trustee suffix kept)
+      - 'JOHN SMITH'             → ('John', 'Smith')
+      - 'MARY ELLEN JONES'       → ('Mary', 'Ellen Jones')  (first token + rest)
+      - 'SMITH'                  → ('', 'Smith')             (one token → last)
+      - 'SMITH JOHN TR'          → ('Smith', 'John Tr')      (trustee suffix kept)
+      - 'JOHN ALDEN MORRIS 812'  → ('John', 'Alden Morris')  (unit bleed stripped)
 
     Capitalization: title-cased so Tracerfy doesn't reject for casing. The
     one-token-only case returns first='' (Tracerfy may still hit via the
@@ -39,6 +40,14 @@ def split_owner_name(raw: str) -> tuple[str, str]:
     s = re.sub(r"\s+", " ", (raw or "").strip())
     if not s:
         return ("", "")
+    tokens = s.split(" ")
+    # ~2.3% of non-LLC owner_name strings carry a trailing unit number
+    # from the unit column ('JOHN ALDEN MORRIS 812'); Tracerfy normal
+    # mode misses when the last name carries a number. Only strip when
+    # 2+ tokens remain so ambiguous 2-token cases ('SMITH 812') survive.
+    while len(tokens) >= 3 and tokens[-1].isdigit():
+        tokens.pop()
+    s = " ".join(tokens)
     parts = s.split(" ", 1)
     if len(parts) == 1:
         return ("", parts[0].title())

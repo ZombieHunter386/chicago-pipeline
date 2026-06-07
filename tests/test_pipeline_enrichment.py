@@ -21,6 +21,19 @@ from pipeline.enrichment import (
     ("", ("", "")),                                       # empty → both empty
     ("  John   Smith  ", ("John", "Smith")),              # whitespace collapse
     ("SMITH JOHN TR", ("Smith", "John Tr")),              # assessor trustee encoding
+    # ~2.3% of Cook County non-LLC owner_name strings carry a trailing
+    # unit number bleeding in from the unit column ('JOHN ALDEN MORRIS
+    # 812'). Tracerfy normal-mode misses when the last name carries a
+    # number, so strip the trailing all-digit token.
+    ("JOHN ALDEN MORRIS 812", ("John", "Alden Morris")),
+    ("JUDITH RITHOLZ 1906", ("Judith", "Ritholz")),
+    ("LORI M WOLFSON 2902", ("Lori", "M Wolfson")),
+    # Keep ambiguous 2-token cases as-is: 'SMITH 812' could in principle
+    # be a real (if unusual) last name. Only strip when we still have
+    # 2+ tokens left after the strip.
+    ("SMITH 812", ("Smith", "812")),
+    # Don't touch digit tokens in the middle of the name — only trailing.
+    ("JOHN 123 SMITH", ("John", "123 Smith")),
 ])
 def test_split_owner_name(raw, expected):
     assert split_owner_name(raw) == expected
