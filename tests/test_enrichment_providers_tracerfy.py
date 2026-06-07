@@ -194,6 +194,16 @@ def test_lookup_handles_500_error(monkeypatch):
     ("", {"address": "", "city": "", "state": "", "zip": ""}),
     ("123 Main St Apt 4, Chicago, IL 60601",
      {"address": "123 Main St Apt 4", "city": "Chicago", "state": "IL", "zip": "60601"}),
+    # Real Cook County assessor mail_address strings — street-only, no
+    # city/state/zip. The 2-letter suffixes (DR, RD, ST) must NOT be
+    # mistaken for state codes; only the whitelist of real US state codes
+    # counts as a state.
+    ("3550 N LAKE SHORE DR",
+     {"address": "3550 N LAKE SHORE DR", "city": "", "state": "", "zip": ""}),
+    ("655 W IRVING PARK RD",
+     {"address": "655 W IRVING PARK RD", "city": "", "state": "", "zip": ""}),
+    ("1806 N HALSTED ST",
+     {"address": "1806 N HALSTED ST", "city": "", "state": "", "zip": ""}),
 ])
 def test_parse_mail_address(raw_addr, expected):
     assert parse_mail_address(raw_addr) == expected

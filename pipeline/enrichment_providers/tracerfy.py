@@ -30,7 +30,20 @@ TRACERFY_ENDPOINT = "https://tracerfy.com/v1/api/trace/lookup/"
 
 
 ZIP_RE = re.compile(r"\b(\d{5}(?:-\d{4})?)\b")
-STATE_RE = re.compile(r"\b([A-Z]{2})\b")
+
+# Whitelist of US state codes (50 states + DC). The earlier bare \b[A-Z]{2}\b
+# regex falsely matched street-suffix abbreviations like DR/RD/ST/AVE/BLVD as
+# state codes — catastrophic on Cook County mail_address strings, which are
+# usually street-only ("3550 N LAKE SHORE DR"). With a whitelist, only real
+# state codes count.
+US_STATE_CODES = {
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA",
+    "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA",
+    "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY",
+    "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX",
+    "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+}
+STATE_RE = re.compile(r"\b(" + "|".join(sorted(US_STATE_CODES)) + r")\b")
 
 
 def parse_mail_address(raw: str) -> dict:
