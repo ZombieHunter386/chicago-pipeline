@@ -584,6 +584,9 @@
 .contacts-actions {
   display: flex; gap: 8px; margin-top: 6px;
 }
+.contact-actions {
+  display: flex; gap: 4px;
+}
 
 #bulk-trace-progress {
   display: flex; gap: 8px; align-items: center; margin: 8px 0;

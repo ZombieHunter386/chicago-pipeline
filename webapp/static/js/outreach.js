@@ -151,7 +151,7 @@
     const kindIcon = c.email ? '✉' : '☎';
     const value = c.email || c.phone;
     const meta = c.confidence_pct != null
-      ? `${c.confidence_pct}% · ${c.enrichment_source || ''}`
+      ? `${c.confidence_pct}% · ${humanizeSourceLabel(c.enrichment_source || c.source || '')}`
       : humanizeSourceLabel(c.enrichment_source || c.source || '');
     const related = c.related_person_name
       ? ` <span class="contact-related">via ${escapeHtml(c.related_person_name)}</span>` : '';
@@ -225,21 +225,63 @@
   }
 
   function openAddManual(pin) {
-    const value = prompt("Email or phone to add (manual entry):");
-    if (!value || !value.trim()) return;
-    const isEmail = value.includes('@');
-    const body = isEmail
-      ? {pin, email: value.trim(), source: 'manual'}
-      : {pin, phone: value.trim(), source: 'manual'};
-    fetch('/api/contacts/upsert', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body),
-    }).then(r => {
-      if (!r.ok) throw new Error('save failed');
-      showToast('Added', 'success');
-      window.dispatchEvent(new CustomEvent('outreach:refresh', {detail: {pin}}));
-    }).catch(_ => showToast("Couldn't add", 'error'));
+    // Non-blocking modal — replaces the synchronous browser prompt() that
+    // froze the main thread and looked out of place vs the rest of the UI.
+    // Reuses the existing .outreach-modal styling.
+    const existing = document.getElementById('add-manual-modal-root');
+    if (existing) existing.remove();
+
+    const root = document.createElement('div');
+    root.id = 'add-manual-modal-root';
+    root.className = 'outreach-modal-backdrop';
+    root.innerHTML = `
+      <div class="outreach-modal" role="dialog" aria-modal="true" aria-label="Add contact">
+        <div class="outreach-modal-head">
+          <h3>Add contact</h3>
+          <button type="button" class="btn btn-sm" id="add-manual-cancel">Cancel</button>
+        </div>
+        <div class="outreach-modal-body">
+          <label for="add-manual-value">Email or phone</label>
+          <input type="text" id="add-manual-value"
+                 placeholder="someone@example.com or 312-555-0100">
+          <div style="display:flex; gap:8px; margin-top:8px;">
+            <button type="button" class="btn btn-primary" id="add-manual-save">Save</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(root);
+
+    const input = root.querySelector('#add-manual-value');
+    input.focus();
+
+    function close() { root.remove(); }
+    root.querySelector('#add-manual-cancel').addEventListener('click', close);
+    root.addEventListener('click', (e) => { if (e.target === root) close(); });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') close();
+      if (e.key === 'Enter') save();
+    });
+
+    function save() {
+      const value = (input.value || '').trim();
+      if (!value) return;
+      const isEmail = value.includes('@');
+      const body = isEmail
+        ? {pin, email: value, source: 'manual'}
+        : {pin, phone: value, source: 'manual'};
+      fetch('/api/contacts/upsert', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+      }).then(r => {
+        if (!r.ok) throw new Error('save failed');
+        showToast('Added', 'success');
+        window.dispatchEvent(new CustomEvent('outreach:refresh', {detail: {pin}}));
+        close();
+      }).catch(_ => showToast("Couldn't add", 'error'));
+    }
+    root.querySelector('#add-manual-save').addEventListener('click', save);
   }
 
   function openComposeForNextDue(parcel, data) {
@@ -703,7 +745,7 @@
                   ${escapeHtml(c.email)}
                   <span class="bcc-meta">${escapeHtml(
                     c.confidence_pct != null
-                      ? c.confidence_pct + '% · ' + (c.enrichment_source || '')
+                      ? c.confidence_pct + '% · ' + humanizeSourceLabel(c.enrichment_source || c.source || '')
                       : humanizeSourceLabel(c.enrichment_source || c.source || '')
                   )}</span>
                 </label>
