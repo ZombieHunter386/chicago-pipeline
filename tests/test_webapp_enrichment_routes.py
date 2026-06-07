@@ -64,6 +64,29 @@ def test_post_enrichment_lookup_409_already_has_contacts(app):
     assert r.status_code == 409
 
 
+def test_post_enrichment_lookup_502_when_provider_errors(app):
+    """When the provider returns status='error' (e.g. Tracerfy 400 on a
+    malformed payload), the endpoint must surface that as 502 so the UI can
+    show the operator what went wrong. Previously this returned 200 with an
+    empty contacts list, indistinguishable from a legitimate no-hit miss."""
+    class ErrorProvider:
+        name = "stub-error"
+        cost_per_lookup_usd = 0.10
+        def lookup(self, **_kwargs):
+            return EnrichmentResult(
+                contacts=[], raw_response_json='{"city":["required"]}',
+                cost_usd=0.0, provider="stub-error", status="error",
+                error_message='HTTP 400: {"city":["required"]}',
+            )
+    app.config["ENRICHMENT_SKIP_PROVIDER"] = ErrorProvider()
+
+    client = app.test_client()
+    r = client.post("/api/enrichment/lookup/14000000000001")
+    assert r.status_code == 502
+    # Flask's abort(502, msg) puts the message in the response body
+    assert "HTTP 400" in r.get_data(as_text=True)
+
+
 def test_post_enrichment_bulk_kicks_off_job(app):
     client = app.test_client()
     r = client.post("/api/enrichment/bulk", json={"pins": ["14000000000001"]})

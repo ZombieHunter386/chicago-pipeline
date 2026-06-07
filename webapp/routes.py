@@ -748,10 +748,18 @@ def register(app: Flask) -> None:
                 ) and request.args.get("confirm") != "true":
                     abort(429, "soft daily cap would be exceeded; resend with ?confirm=true to override")
                 try:
-                    _enrich_one_pin(conn, job_id=None, pin=pin, provider=provider)
+                    result = _enrich_one_pin(
+                        conn, job_id=None, pin=pin, provider=provider,
+                    )
                     conn.commit()
                 except Exception as e:
                     abort(500, str(e))
+                # Provider returned an error row (e.g. Tracerfy 400 on a
+                # malformed payload). The error is already persisted to
+                # enrichment_results for audit; surface 502 to the UI so
+                # operators see what went wrong instead of an empty list.
+                if result.status == "error":
+                    abort(502, result.error_message or "provider error")
                 rows = [dict(r) for r in conn.execute(
                     "SELECT * FROM contacts WHERE pin=?", (pin,)
                 )]

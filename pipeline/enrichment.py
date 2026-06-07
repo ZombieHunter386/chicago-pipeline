@@ -256,12 +256,17 @@ def _persist_contacts(conn, pin: str, result: EnrichmentResult) -> None:
 
 
 def _enrich_one_pin(conn, job_id: int, pin: str,
-                    provider: EnrichmentProvider) -> None:
+                    provider: EnrichmentProvider) -> EnrichmentResult:
     """Run one provider lookup for one pin and persist the results.
 
     Picks the lookup mode based on parcels.is_llc:
       - is_llc=0 → split owner_name into first/last and call normal mode
       - is_llc=1 → omit names, call advanced mode (address-only)
+
+    Returns the EnrichmentResult so the single-pin endpoint can surface
+    provider errors (status='error') as HTTP 502 instead of silently
+    succeeding with an empty contacts list. The bulk path discards the
+    return value and relies on its own per-pin checkpoint table.
 
     Raises ValueError if the pin is missing from parcels; the caller is
     expected to catch and write the per-pin error row.
@@ -297,6 +302,7 @@ def _enrich_one_pin(conn, job_id: int, pin: str,
         result=result,
     )
     _persist_contacts(conn, pin, result)
+    return result
 
 
 def run_bulk_enrichment(
