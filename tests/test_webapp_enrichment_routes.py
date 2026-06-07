@@ -134,6 +134,36 @@ def test_post_contact_mark_wrong_person(app):
     assert r.status_code == 200
 
 
+def test_outreach_send_503_when_refresh_token_revoked(app, monkeypatch):
+    """When the Gmail refresh token's been revoked (Google's 7-day idle
+    expiry, or user revoked at myaccount.google.com), the send endpoint
+    must return 503 'Gmail not connected' so the UI can prompt re-consent
+    — not 500 internal_error which leaks raw OAuth gunk to the operator."""
+    import google.auth.exceptions
+    from pipeline import gmail_client
+
+    client = app.test_client()
+    client.post("/api/enrichment/lookup/14000000000001")  # seed alive contact
+    app.config["GMAIL_SENDER_ADDRESS"] = "me@example.com"
+
+    def revoked(*args, **kwargs):
+        raise google.auth.exceptions.RefreshError(
+            "invalid_grant: Token has been expired or revoked.",
+            {"error": "invalid_grant"},
+        )
+    monkeypatch.setattr(gmail_client, "send_email", revoked)
+
+    r = client.post("/api/outreach/send", json={
+        "pin": "14000000000001",
+        "to_list": ["john@x.com"],
+        "subject": "hi", "body": "hello",
+        "touch_number": 1,
+    })
+    assert r.status_code == 503
+    body = r.get_data(as_text=True)
+    assert "Gmail" in body or "oauth" in body.lower()
+
+
 def test_send_with_to_list_uses_bcc(app, monkeypatch):
     """POST /api/outreach/send accepts to_list and the request body sends
     via BCC (preserving the visible To: header as the sender)."""

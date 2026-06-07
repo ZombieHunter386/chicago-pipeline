@@ -8,6 +8,7 @@ from typing import Any
 from flask import Flask, abort, current_app, jsonify, redirect, render_template, request, url_for
 from werkzeug.exceptions import HTTPException
 
+from google.auth.exceptions import RefreshError
 from googleapiclient.errors import HttpError
 
 from pipeline import outreach as outreach_module, gmail_client
@@ -947,6 +948,13 @@ def register(app: Flask) -> None:
                     )
                 except gmail_client.GmailNotConnectedError as e:
                     abort(503, f"Gmail not connected: {e}")
+                except RefreshError as e:
+                    # load_credentials already translates RefreshError to
+                    # GmailNotConnectedError. This branch is defense-in-depth
+                    # for any future path where RefreshError escapes — e.g.
+                    # the Google client retrying inside send_email itself.
+                    abort(503, f"Gmail not connected: refresh token rejected ({e}). "
+                          "Re-consent at /api/oauth/start.")
                 except HttpError as e:
                     # Quota (429), forbidden sender (403), or upstream 5xx.
                     # Surface a 503 with the actual reason so the UI can show it.

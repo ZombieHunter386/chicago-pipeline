@@ -20,6 +20,7 @@ from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
 
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
@@ -70,7 +71,17 @@ def load_credentials(token_path: Path) -> Credentials:
     # Library refreshes automatically on API calls, but the explicit refresh
     # here means we surface auth errors before constructing the message.
     if creds.expired and creds.refresh_token:
-        creds.refresh(Request())
+        try:
+            creds.refresh(Request())
+        except RefreshError as e:
+            # Refresh token expired or user revoked the app at
+            # myaccount.google.com/permissions. Translate to the same error
+            # the no-token case raises so the route's existing 503 branch
+            # handles it — operator just needs to re-consent at
+            # /api/oauth/start.
+            raise GmailNotConnectedError(
+                f"Gmail refresh token rejected ({e}). Re-consent at /api/oauth/start."
+            ) from e
         # Persist any refreshed token data back to disk.
         save_token(path, json.loads(creds.to_json()))
     return creds
