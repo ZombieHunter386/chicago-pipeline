@@ -285,10 +285,30 @@
   }
 
   function openComposeForNextDue(parcel, data) {
-    const nextDue = data.sequence && data.sequence.next_due;
-    if (!nextDue) { showToast('No touch is currently due', 'info'); return; }
-    const touchNum = nextDue.touch;
-    const channel = nextDue.channel;
+    const seq = data.sequence || {};
+    // Prefer the due-today touch; fall back to next un-sent so the operator
+    // can send ahead of schedule. next_unsent is null only at end-of-sequence.
+    const touch = seq.next_due || seq.next_unsent;
+    if (!touch) {
+      showToast(
+        seq.is_end_of_sequence
+          ? 'End of sequence — all 7 touches sent'
+          : 'No touch available',
+        'info',
+      );
+      return;
+    }
+    if (touch.available === false) {
+      showToast(`Touch ${touch.touch} (${touch.channel}) needs a ${touch.channel} contact`, 'info');
+      return;
+    }
+    // Inform the operator if they're sending ahead of schedule (next_due
+    // was null and we fell back to next_unsent).
+    if (!seq.next_due && seq.next_unsent) {
+      showToast(`Sending touch ${touch.touch} ahead of schedule`, 'info');
+    }
+    const touchNum = touch.touch;
+    const channel = touch.channel;
     if (channel === 'email') {
       window.__outreachOpenCompose(parcel, data.contacts || [],
                                     data.sender_address, touchNum);

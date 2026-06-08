@@ -597,6 +597,65 @@ def test_get_parcel_outreach_includes_sequence_block(app_on, outreach_db_path):
     assert seq["is_paused"] is False
 
 
+def test_sequence_exposes_next_unsent_when_no_touch_is_due(app_on, outreach_db_path):
+    """The sequence payload must always include next_unsent (next touch
+    that hasn't been sent, regardless of cadence date) so the operator can
+    Compose ahead of schedule. next_due remains None when nothing is due,
+    but next_unsent points at the next touch the operator could send."""
+    import sqlite3
+    conn = sqlite3.connect(outreach_db_path)
+    # Touch 1 sent yesterday (test clock = 2026-05-11). Touch 2 is at
+    # day_offset=3 so isn't due until 2026-05-13 — no next_due today.
+    conn.execute(
+        "UPDATE parcels SET mail_address=? WHERE pin=?",
+        ("500 N Main", "14210010010000"),
+    )
+    conn.execute(
+        "INSERT INTO outreach (pin, touch_number, channel, sent_date) "
+        "VALUES (?, ?, ?, ?)",
+        ("14210010010000", 1, "email", "2026-05-10T09:00:00Z"),
+    )
+    conn.execute(
+        "INSERT INTO contacts (pin, email, source) VALUES (?, ?, ?)",
+        ("14210010010000", "owner@example.com", "manual"),
+    )
+    conn.commit()
+    conn.close()
+
+    resp = app_on.test_client().get("/api/parcels/14210010010000/outreach")
+    assert resp.status_code == 200
+    seq = resp.get_json()["sequence"]
+    assert seq["next_due"] is None, "touch 2 isn't due yet on test clock"
+    assert seq["next_unsent"] is not None, \
+        "operator must have a fallback when nothing is due"
+    assert seq["next_unsent"]["touch"] == 2
+    assert seq["next_unsent"]["channel"] == "email"
+    assert seq["next_unsent"]["available"] is True  # contact email present
+
+
+def test_sequence_next_unsent_null_at_end_of_sequence(app_on, outreach_db_path):
+    """Once all 7 touches are sent, next_unsent must be None so the UI
+    surfaces 'end of sequence' instead of letting the user re-send touch 7."""
+    import sqlite3
+    conn = sqlite3.connect(outreach_db_path)
+    conn.execute(
+        "UPDATE parcels SET mail_address=? WHERE pin=?",
+        ("500 N Main", "14210010010000"),
+    )
+    for t in range(1, 8):
+        conn.execute(
+            "INSERT INTO outreach (pin, touch_number, channel, sent_date) "
+            "VALUES (?, ?, ?, ?)",
+            ("14210010010000", t, "email", "2026-04-01T09:00:00Z"),
+        )
+    conn.commit()
+    conn.close()
+
+    resp = app_on.test_client().get("/api/parcels/14210010010000/outreach")
+    seq = resp.get_json()["sequence"]
+    assert seq["next_unsent"] is None
+
+
 def test_get_parcel_outreach_sequence_paused(app_on, outreach_db_path):
     """When a parcel is paused, the sequence block reports it AND
     suppresses next_due (the cadence engine never gets called)."""

@@ -482,6 +482,43 @@ def register(app: Flask) -> None:
                         "available": True,
                     }
 
+            # Always-available "next unsent touch" — the next sequence step
+            # the operator could send right now, ignoring cadence dates.
+            # Lets the UI offer a "send ahead of schedule" path when
+            # next_due is null but we're not at end-of-sequence. The check
+            # mirrors next_due's `available` semantics: the channel's
+            # required contact field (email / phone / mail_address) must
+            # be present on at least one alive contact.
+            next_unsent = None
+            if not is_eos:
+                sent_touch_nums = {
+                    r["touch_number"] for r in outreach_dicts
+                    if r.get("touch_number") is not None
+                }
+                alive_contacts = [
+                    c for c in contacts
+                    if not c.get("dead") and not c.get("wrong_person")
+                ]
+                has_email = any(c.get("email") for c in alive_contacts)
+                has_phone = any(c.get("phone") for c in alive_contacts)
+                has_mail_addr = bool(parcel.get("mail_address"))
+                for t in sorted(cadence["sequence"], key=lambda x: x["touch"]):
+                    if t["touch"] in sent_touch_nums:
+                        continue
+                    requires = t.get("requires")
+                    available = (
+                        has_email if requires == "email"
+                        else has_phone if requires == "phone"
+                        else has_mail_addr if requires == "mail_address"
+                        else True
+                    )
+                    next_unsent = {
+                        "touch": t["touch"],
+                        "channel": t["channel"],
+                        "available": available,
+                    }
+                    break
+
             # Response shape: keep the legacy single `contact` field for any
             # callers still reading it, and add `contacts` (plural) which the
             # T11 multi-row UI consumes. `contact` mirrors contacts[0] so old
@@ -500,6 +537,7 @@ def register(app: Flask) -> None:
                     "anchor_date": anchor_date,
                     "current_touch": current_touch,
                     "next_due": next_due,
+                    "next_unsent": next_unsent,
                     "is_end_of_sequence": is_eos,
                     "is_paused": is_paused,
                 },
