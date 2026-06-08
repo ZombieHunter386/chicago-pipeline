@@ -372,6 +372,20 @@ CREATE TABLE IF NOT EXISTS raw_cdp_cta_stations (
     fetched_at TEXT
 );
 
+-- Source: City of Chicago ADU Eligibility Map (ArcGIS Online).
+-- Each row is one polygon from the City's "ADUAllowedRS2AA_view" layer.
+-- Polygons demarcate RS-zoned areas where ADUs are allowed (with varying
+-- restrictions per polygon). Used by the chicago_adu_zones source to
+-- spatial-join parcel centroids and derive parcels.adu_eligible +
+-- parcels.adu_restriction_text.
+CREATE TABLE IF NOT EXISTS raw_chicago_adu_zones (
+    zone_id TEXT PRIMARY KEY,
+    adu_area_code TEXT,
+    restriction_text TEXT,
+    polygon_wkt TEXT,
+    fetched_at TEXT
+);
+
 -- Source 1H: Cook County GIS Parcel Boundaries (polygon area + dimensions)
 CREATE TABLE IF NOT EXISTS raw_ccgis_parcels (
     pin10 TEXT PRIMARY KEY,

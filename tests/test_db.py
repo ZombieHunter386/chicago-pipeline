@@ -308,6 +308,19 @@ def test_raw_ccgis_parcels_has_width_depth_columns(tmp_path):
     conn.close()
 
 
+def test_raw_chicago_adu_zones_table_exists(tmp_path):
+    from pipeline.db import init_db
+    import sqlite3
+    p = tmp_path / "t.db"
+    init_db(p)
+    conn = sqlite3.connect(p)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(raw_chicago_adu_zones)")}
+    expected = {"zone_id", "adu_area_code", "restriction_text",
+                "polygon_wkt", "fetched_at"}
+    assert expected.issubset(cols), f"missing: {expected - cols}"
+    conn.close()
+
+
 def test_init_db_adds_scoring_profile_columns(tmp_path):
     """Phase 1 of the scoring-profiles plan adds 8 columns to parcels:
     2 lot-geometry, 3 ADU-eligibility, 1 derived sale-price, 2 score
