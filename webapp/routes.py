@@ -102,6 +102,16 @@ def register(app: Flask) -> None:
         )
         return jsonify(schema)
 
+    @app.get("/api/profile-defaults")
+    def api_profile_defaults():
+        """Return the profile registry: {profile_name: {score_column,
+        recommended_filters, ...}}. The UI uses this to populate the
+        profile dropdown + auto-apply recommended filters when the
+        operator picks a profile."""
+        from pipeline.profile_defaults import load_profile_defaults
+        out = load_profile_defaults(Path(app.config["PROFILE_DEFAULTS_PATH"]))
+        return jsonify(out)
+
     @app.get("/api/scoring-config")
     def api_scoring_config():
         """Return the active scoring YAML so the UI can render the

@@ -17,6 +17,7 @@ def create_app(
     gmail_sender_address: str | None = None,
     esri_api_key: str | None = None,
     due_digest_last_run_path: Path | None = None,
+    profile_defaults_path: Path | None = None,
 ) -> Flask:
     app = Flask(
         __name__,
@@ -52,6 +53,9 @@ def create_app(
     # configured" rather than reading a real path. Tests and prod each set
     # their own path explicitly. Avoids relative-path test pollution.
     app.config["DUE_DIGEST_LAST_RUN_PATH"] = due_digest_last_run_path
+    app.config["PROFILE_DEFAULTS_PATH"] = profile_defaults_path or (
+        Path(__file__).resolve().parent.parent / "config" / "profile_defaults.yaml"
+    )
 
     # Enrichment provider wiring — reads config/enrichment.yaml + env for the
     # provider API keys, hands the constructed providers to the routes via

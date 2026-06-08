@@ -347,3 +347,35 @@ def test_api_consolidation_group_detail_includes_zoning_summary(pop_client):
 def test_api_consolidation_group_detail_404_for_unknown(pop_client):
     resp = pop_client.get("/api/consolidation-groups/999999")
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# /api/profile-defaults (Task 5.1)
+# ---------------------------------------------------------------------------
+
+def test_api_profile_defaults_returns_registry(tmp_path):
+    """GET /api/profile-defaults returns the loaded registry as JSON."""
+    from webapp.app import create_app
+    from pipeline.db import init_db
+
+    db = tmp_path / "t.db"
+    init_db(db)
+
+    cfg = tmp_path / "profile_defaults.yaml"
+    cfg.write_text("""\
+adu:
+  yaml: scoring_adu.yaml
+  score_column: score_adu
+  recommended_filters:
+    adu_eligible: 1
+    lot_size_sf: {between: [3500, 12000]}
+""")
+
+    app = create_app(db_path=db, feature_outreach=False,
+                     profile_defaults_path=cfg)
+    resp = app.test_client().get("/api/profile-defaults")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert "adu" in data
+    assert data["adu"]["score_column"] == "score_adu"
+    assert data["adu"]["recommended_filters"]["adu_eligible"] == 1
