@@ -186,15 +186,20 @@ def create_enrichment_job(conn, pin_list: list[str]) -> int:
 
 
 def _has_fresh_contacts(conn, pin: str) -> bool:
-    """Per the spec: any existing contact row counts as fresh; no time-decay.
+    """True when the parcel has at least one *alive* contact (not dead,
+    not flagged wrong_person).
 
-    A parcel with even one prior contact (manual or enrichment-sourced) is
-    treated as already enriched and skipped — avoids re-paying the provider
-    for pins that already have something workable. Operators wanting a
-    re-trace must explicitly clear the contacts row first.
+    The point of the gate is 'do we already have something workable?'.
+    Dead and wrong_person contacts are explicitly NOT workable — the
+    operator marked them so. Counting them would lock the operator out
+    of re-tracing once every contact has been cleaned out, forcing
+    them to delete contact rows manually before they could spend
+    another $0.10 looking for new ones.
     """
     row = conn.execute(
-        "SELECT COUNT(*) AS c FROM contacts WHERE pin=?", (pin,)
+        "SELECT COUNT(*) AS c FROM contacts "
+        "WHERE pin=? AND COALESCE(dead, 0)=0 AND COALESCE(wrong_person, 0)=0",
+        (pin,),
     ).fetchone()
     n = row["c"] if hasattr(row, "keys") else row[0]
     return n > 0

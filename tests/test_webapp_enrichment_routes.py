@@ -64,6 +64,42 @@ def test_post_enrichment_lookup_409_already_has_contacts(app):
     assert r.status_code == 409
 
 
+def test_post_enrichment_lookup_allows_retrace_when_all_contacts_dead(app):
+    """The 409 'already has contacts' gate must only count alive contacts.
+    If every existing contact is dead or wrong_person, the operator has
+    no usable contact and must be allowed to spend another $0.10 to look
+    for new ones."""
+    client = app.test_client()
+    # Seed first trace, then mark the resulting contact dead
+    client.post("/api/enrichment/lookup/14000000000001")
+    with app.app_context():
+        from webapp.routes import _conn
+        with _conn() as conn:
+            cid = conn.execute(
+                "SELECT contact_id FROM contacts WHERE pin='14000000000001'"
+            ).fetchone()[0]
+    client.post(f"/api/contacts/{cid}/dead")
+    # Re-trace should now succeed (not 409)
+    r = client.post("/api/enrichment/lookup/14000000000001")
+    assert r.status_code == 200, \
+        f"expected re-trace allowed once contacts are dead; got {r.status_code} {r.get_data(as_text=True)}"
+
+
+def test_post_enrichment_lookup_allows_retrace_when_all_contacts_wrong_person(app):
+    """Symmetric to the dead case — wrong_person contacts shouldn't gate re-trace either."""
+    client = app.test_client()
+    client.post("/api/enrichment/lookup/14000000000001")
+    with app.app_context():
+        from webapp.routes import _conn
+        with _conn() as conn:
+            cid = conn.execute(
+                "SELECT contact_id FROM contacts WHERE pin='14000000000001'"
+            ).fetchone()[0]
+    client.post(f"/api/contacts/{cid}/wrong-person")
+    r = client.post("/api/enrichment/lookup/14000000000001")
+    assert r.status_code == 200
+
+
 def test_post_enrichment_lookup_502_when_provider_errors(app):
     """When the provider returns status='error' (e.g. Tracerfy 400 on a
     malformed payload), the endpoint must surface that as 502 so the UI can
