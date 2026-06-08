@@ -99,12 +99,19 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient) -> int:
     # Compute area in EPSG:3435 (US survey feet) → area in sq ft.
     gdf = gpd.GeoDataFrame(refined, crs="EPSG:4326").to_crs(PLANAR_CRS)
     gdf["area_sf"] = gdf.geometry.area
+    # Per the scoring-profiles spec, also derive (width, depth) from the
+    # minimum rotated rectangle. Cheap to compute alongside area.
+    width_depth = gdf.geometry.apply(_polygon_to_width_depth)
+    gdf["width_ft"] = width_depth.map(lambda wd: wd[0])
+    gdf["depth_ft"] = width_depth.map(lambda wd: wd[1])
     # One pin10 may appear in multiple rows in the source dataset
     # (multipart oddities); keep the largest area per pin10.
     gdf = gdf.sort_values("area_sf", ascending=False).drop_duplicates(subset=["pin10"], keep="first")
 
     raw_rows = [
         {"pin10": row["pin10"], "area_sf": float(row["area_sf"]),
+         "width_ft": float(row["width_ft"]),
+         "depth_ft": float(row["depth_ft"]),
          "fetched_at": fetched_at}
         for _, row in gdf.iterrows()
     ]
@@ -118,9 +125,12 @@ def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient) -> int:
         # idx_parcels_pin10 index added in the condo-rollup change.
         for row in raw_rows:
             conn.execute(
-                "UPDATE parcels SET lot_size_sf = :lot_sf, last_updated_date = :now "
+                "UPDATE parcels SET lot_size_sf = :lot_sf, "
+                "  lot_width_ft = :width, lot_depth_ft = :depth, "
+                "  last_updated_date = :now "
                 "WHERE pin10 = :p10",
-                {"lot_sf": row["area_sf"], "now": fetched_at, "p10": row["pin10"]},
+                {"lot_sf": row["area_sf"], "width": row["width_ft"],
+                 "depth": row["depth_ft"], "now": fetched_at, "p10": row["pin10"]},
             )
 
         # Recompute built_far for every parcel that has both fields populated.

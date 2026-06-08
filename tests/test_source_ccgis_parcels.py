@@ -131,6 +131,33 @@ def test_ccgis_parcels_overwrites_existing_lot_size(db_path, geo, cook_client):
 
 
 @responses.activate
+def test_ccgis_parcels_writes_lot_width_and_depth(db_path, geo, cook_client):
+    """After fetch, parcels.lot_width_ft and parcels.lot_depth_ft are
+    populated for every pin sharing a fetched polygon."""
+    _seed_through_characteristics(db_path, geo, cook_client)
+
+    fx = json.loads((FIXTURES / "ccgis_parcels.json").read_text())
+    responses.add(responses.GET,
+        f"https://datacatalog.cookcountyil.gov/resource/{ccgis_parcels.DATASET_ID}.json",
+        json=fx, status=200)
+    responses.add(responses.GET,
+        f"https://datacatalog.cookcountyil.gov/resource/{ccgis_parcels.DATASET_ID}.json",
+        json=[], status=200)
+    ccgis_parcels.fetch(geo, db_path, cook_client)
+
+    conn = get_connection(db_path)
+    rows = conn.execute(
+        "SELECT pin, lot_width_ft, lot_depth_ft FROM parcels "
+        "WHERE lot_width_ft IS NOT NULL"
+    ).fetchall()
+    assert len(rows) >= 1, "expected at least one parcel with lot_width_ft populated"
+    for r in rows:
+        assert r["lot_width_ft"] > 0
+        assert r["lot_depth_ft"] >= r["lot_width_ft"]
+    conn.close()
+
+
+@responses.activate
 def test_ccgis_parcels_returns_zero_when_no_polygons(db_path, geo, cook_client):
     """Empty Socrata response should return 0 cleanly, not raise."""
     _seed_through_characteristics(db_path, geo, cook_client)
