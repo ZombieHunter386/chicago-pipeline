@@ -160,6 +160,24 @@ filter_groups:
         label: Last sale date
         type: date_range
 
+  - group: ADU
+    filters:
+      - column: adu_eligible
+        label: ADU eligible
+        type: checkbox
+      - column: adu_has_annual_limits
+        label: ADU annual limits apply
+        type: checkbox
+      - column: adu_restriction_text
+        label: ADU restriction
+        type: dropdown
+      - column: lot_width_ft
+        label: Lot width (ft)
+        type: range
+      - column: lot_depth_ft
+        label: Lot depth (ft)
+        type: range
+
 stage_pills:
   column: stage
   values: [scored, outreach, responded, introduced, dead]

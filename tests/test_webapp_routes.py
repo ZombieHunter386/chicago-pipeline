@@ -204,7 +204,7 @@ def test_e2e_flow_against_smoke_db(pop_client, populated_db_path):
     """
     # 1. Filter schema is well-formed and has the expected number of groups.
     filters = pop_client.get("/api/filters").get_json()
-    assert len(filters["filter_groups"]) == 8
+    assert len(filters["filter_groups"]) == 9
 
     # 2. First page of the ranked list. Total comes from the DB so the
     #    test isn't pinned to a hardcoded fixture row count. Default
