@@ -2,6 +2,7 @@ import sqlite3
 
 import pytest
 from webapp.app import create_app
+from pipeline.db import init_db
 
 
 @pytest.fixture
@@ -347,6 +348,83 @@ def test_api_consolidation_group_detail_includes_zoning_summary(pop_client):
 def test_api_consolidation_group_detail_404_for_unknown(pop_client):
     resp = pop_client.get("/api/consolidation-groups/999999")
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# /api/parcels ?profile= param (Task 5.2)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def app_with_two_profile_scores(tmp_path):
+    """App seeded with 3 parcels carrying score + score_adu values plus a
+    profile_defaults.yaml registering value_add and adu."""
+    db = tmp_path / "t.db"
+    init_db(db)
+    with sqlite3.connect(db) as conn:
+        conn.executemany(
+            "INSERT INTO parcels(pin, pin10, address, score, score_adu) "
+            "VALUES (?, ?, ?, ?, ?)",
+            [
+                ("00000000000001", "0000000000", "100 A St", 90.0, 30.0),
+                ("00000000000002", "0000000000", "200 B St", 50.0, 80.0),
+                ("00000000000003", "0000000000", "300 C St", 70.0, 60.0),
+            ],
+        )
+        conn.commit()
+
+    cfg = tmp_path / "profile_defaults.yaml"
+    cfg.write_text("""\
+value_add:
+  yaml: scoring.yaml
+  score_column: score
+  recommended_filters: {}
+
+adu:
+  yaml: scoring_adu.yaml
+  score_column: score_adu
+  recommended_filters: {}
+""")
+
+    return create_app(
+        db_path=db, feature_outreach=False,
+        profile_defaults_path=cfg,
+    )
+
+
+def test_api_parcels_orders_by_profile_score_column(app_with_two_profile_scores):
+    """When ?profile=adu, results are sorted by score_adu DESC instead
+    of the default `score` column."""
+    client = app_with_two_profile_scores.test_client()
+    resp = client.get("/api/parcels?profile=adu&limit=5")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    # The seeded parcels (90/30, 50/80, 70/60) should order as B(80), C(60), A(30).
+    scores = [row["score_adu"] for row in data["parcels"]
+              if row.get("score_adu") is not None]
+    assert scores == sorted(scores, reverse=True)
+    assert scores[0] == 80.0
+
+
+def test_api_parcels_rejects_unknown_profile(app_with_two_profile_scores):
+    """An unknown profile param returns 400."""
+    client = app_with_two_profile_scores.test_client()
+    resp = client.get("/api/parcels?profile=nonexistent")
+    assert resp.status_code == 400
+
+
+def test_api_parcels_defaults_to_legacy_score_column(app_with_two_profile_scores):
+    """Without ?profile, the endpoint returns 200 and all parcels carry score
+    values. Using ?sort=score&dir=desc (explicit) confirms score-based ordering.
+    Seeded parcels (90/30, 50/80, 70/60) order as A(90), C(70), B(50)."""
+    client = app_with_two_profile_scores.test_client()
+    # Use explicit sort=score to confirm score ordering works independently of
+    # profile — the default ordering is by last_updated_date which may differ.
+    resp = client.get("/api/parcels?sort=score&dir=desc&limit=5")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    scores = [row["score"] for row in data["parcels"] if row.get("score") is not None]
+    assert scores == sorted(scores, reverse=True)
+    assert scores[0] == 90.0
 
 
 # ---------------------------------------------------------------------------

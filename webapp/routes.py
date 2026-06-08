@@ -139,8 +139,21 @@ def register(app: Flask) -> None:
         include_units = request.args.get("include_condo_units", "").lower() in {"true", "1"}
         top_n_only = request.args.get("top_n_only", "").lower() in {"true", "1"}
         visible_categories = _parse_visible_categories(request.args.get("categories"))
-        sort = request.args.get("sort") or None
-        direction = request.args.get("dir", "desc")
+
+        # Profile selection: ?profile=<name> picks which score column to sort by.
+        # Resolves via profile_defaults.yaml registry; unknown profile → 400.
+        profile_param = request.args.get("profile")
+        if profile_param:
+            from pipeline.profile_defaults import load_profile_defaults
+            profiles = load_profile_defaults(Path(app.config["PROFILE_DEFAULTS_PATH"]))
+            if profile_param not in profiles:
+                abort(400, f"unknown profile: {profile_param}")
+            sort = profiles[profile_param]["score_column"]
+            direction = "desc"
+        else:
+            sort = request.args.get("sort") or None
+            direction = request.args.get("dir", "desc")
+
         try:
             limit = int(request.args.get("limit", DEFAULT_PAGE_SIZE))
             offset = int(request.args.get("offset", 0))

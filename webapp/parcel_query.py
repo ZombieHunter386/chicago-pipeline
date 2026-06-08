@@ -38,6 +38,8 @@ ALLOWED_SORT_COLUMNS = {
     "address", "owner_name",
     "unit_count", "scofflaw_appearances_count",
     "vacant_violations_count", "vacant_violations_amount_due",
+    # Multi-profile score columns (Phase 5)
+    "score_adu", "score_redev",
 }
 
 DEFAULT_ORDER_BY = (
@@ -141,7 +143,8 @@ def build_parcel_query(
         "years_since_last_permit, appeal_count, oldest_violation_age_days, "
         "first_seen_date, last_updated_date, "
         "scofflaw_appearances_count, vacant_violations_amount_due, "
-        "unit_count, is_scofflaw, vacant_violations_count "
+        "unit_count, is_scofflaw, vacant_violations_count, "
+        "score_adu, score_redev "
         f"FROM parcels {where_sql} "
         f"ORDER BY {order_by} "
         f"LIMIT {int(limit)} OFFSET {int(offset)}"
