@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Chicago Multifamily Pipeline — Review UI</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v=static_v('css/style.css')) }}" />
 </head>
 <body>
 
@@ -135,14 +135,14 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <!-- esri-leaflet powers the optional parcel-outlines overlay (Cook County GIS feature server) -->
 <script src="https://unpkg.com/esri-leaflet@3.0.12/dist/esri-leaflet.js"></script>
-<script src="{{ url_for('static', filename='js/utils.js') }}"></script>
-<script src="{{ url_for('static', filename='js/filters.js') }}"></script>
-<script src="{{ url_for('static', filename='js/list.js') }}"></script>
-<script src="{{ url_for('static', filename='js/map.js') }}"></script>
-<script src="{{ url_for('static', filename='js/detail.js') }}"></script>
+<script src="{{ url_for('static', filename='js/utils.js', v=static_v('js/utils.js')) }}"></script>
+<script src="{{ url_for('static', filename='js/filters.js', v=static_v('js/filters.js')) }}"></script>
+<script src="{{ url_for('static', filename='js/list.js', v=static_v('js/list.js')) }}"></script>
+<script src="{{ url_for('static', filename='js/map.js', v=static_v('js/map.js')) }}"></script>
+<script src="{{ url_for('static', filename='js/detail.js', v=static_v('js/detail.js')) }}"></script>
 {% if feature_outreach %}
-<script src="{{ url_for('static', filename='js/outreach.js') }}"></script>
+<script src="{{ url_for('static', filename='js/outreach.js', v=static_v('js/outreach.js')) }}"></script>
 {% endif %}
-<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js', v=static_v('js/app.js')) }}"></script>
 </body>
 </html>

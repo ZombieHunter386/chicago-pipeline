@@ -73,6 +73,20 @@ def create_app(
             hard_per_run_usd=float(budget_cfg.get("hard_per_run_usd", 2.50)),
         )
 
+    # Static-asset cache-busting: append ?v=<mtime> to /static URLs so the
+    # browser sees a new URL whenever a JS/CSS file changes. Flask sends
+    # Cache-Control: no-cache + ETag already, but Chrome/Safari occasionally
+    # serve stale copies anyway. A query-string version is the bulletproof
+    # fix — different URL == guaranteed cache miss.
+    def static_v(filename: str) -> str:
+        try:
+            return str(int(
+                (Path(app.static_folder) / filename).stat().st_mtime
+            ))
+        except OSError:
+            return "0"
+    app.jinja_env.globals["static_v"] = static_v
+
     from webapp import routes
     routes.register(app)
 
