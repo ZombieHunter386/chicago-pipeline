@@ -23,6 +23,7 @@ from sources import (
     cdp_zoning, cdp_permits, cdp_violations, cdp_vacant, cdp_cta_stations,
     cdp_scofflaw, cdp_vacant_violations, cdp_building_footprints,
     clerk_delinquent,
+    chicago_adu_zones,
 )
 
 
@@ -114,6 +115,13 @@ def run_all(geo: GeographyConfig, db_path: Path, app_token: str,
     # Footprints runs LAST so condo_rollup's is_condo_building flag is set —
     # the merge needs to redirect unit-PIN matches to the building rep PIN.
     results.append(_run("cdp_building_footprints", cdp_building_footprints.fetch, db_path, geo, db_path, cdp))
+    # ADU eligibility — depends on parcels having (lat, lng), which all
+    # prior sources populate. Two-step: fetch polygons, then spatial-join
+    # to parcels.
+    results.append(_run("chicago_adu_zones (fetch)",
+                        chicago_adu_zones.fetch, db_path, db_path))
+    results.append(_run("chicago_adu_zones (apply)",
+                        chicago_adu_zones.apply_to_parcels, db_path, db_path))
     return results
 
 

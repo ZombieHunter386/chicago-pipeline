@@ -14,6 +14,7 @@ def _register_all(monkeypatch):
         ccgis_parcels,
         cdp_zoning, cdp_permits, cdp_violations, cdp_vacant, cdp_cta_stations,
         cdp_scofflaw, cdp_vacant_violations, cdp_building_footprints,
+        chicago_adu_zones,
     )
     from sources.assessor_sales import TODAY as _    # just to ensure import
     monkeypatch.setattr(cdp_permits, "TODAY", date(2026, 4, 19))
@@ -47,6 +48,10 @@ def _register_all(monkeypatch):
         fx = json.loads((FIXTURES / fname).read_text())
         responses.add(responses.GET, f"{cdp}/{ds}.json", json=fx, status=200)
         responses.add(responses.GET, f"{cdp}/{ds}.json", json=[], status=200)
+    # ADU eligibility polygons — ArcGIS REST endpoint
+    adu_fx = json.loads((FIXTURES / "chicago_adu_zones.json").read_text())
+    responses.add(responses.GET, chicago_adu_zones.ARCGIS_QUERY_URL,
+                  json=adu_fx, status=200)
 
 
 @responses.activate
