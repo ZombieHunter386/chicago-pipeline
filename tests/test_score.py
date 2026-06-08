@@ -103,3 +103,54 @@ def test_score_parcels_multi_profile_writes_separate_columns(tmp_path):
     assert row2["score_adu"] > row1["score_adu"]
     assert row1["score_redev"] > row2["score_redev"]
     conn.close()
+
+
+def test_score_parcels_multi_clears_stale_scores_before_writing(tmp_path):
+    """If a parcel's signals change (or the YAML changes) such that the
+    new computed score is different, the stale prior score must not
+    persist. _score_one_profile clears the column before writing."""
+    from pipeline.db import init_db, get_connection
+    from pipeline.score import score_parcels_multi, load_scoring_config
+
+    db = tmp_path / "t.db"
+    init_db(db)
+    conn = get_connection(db)
+    # Seed two parcels with a stale score_adu value the engine should
+    # overwrite (or NULL out).
+    conn.executemany(
+        "INSERT INTO parcels(pin, pin10, lot_size_sf, score_adu) "
+        "VALUES (?, ?, ?, ?)",
+        [
+            ("00000000000001", "0000000000", 4000.0, 99.0),
+            ("00000000000002", "0000000000", 10000.0, 88.0),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    yaml_path = tmp_path / "p.yaml"
+    yaml_path.write_text(
+        "version: t\n"
+        "top_n: 5\n"
+        "signals:\n"
+        "  lot_size_sf:\n"
+        "    weight: 1.0\n"
+        "    kind: continuous\n"
+        "    direction: positive\n"
+        "    insignificant: false\n"
+        "    normalization: {min: 1000, max: 12000}\n"
+    )
+    score_parcels_multi(db, [
+        ("adu", load_scoring_config(yaml_path), "score_adu"),
+    ])
+
+    conn = get_connection(db)
+    # The new scores reflect lot_size_sf normalization (~27.3 and ~81.8),
+    # NOT the stale 99/88 values that were seeded.
+    for pin in ("00000000000001", "00000000000002"):
+        new_score = conn.execute(
+            "SELECT score_adu FROM parcels WHERE pin=?", (pin,)
+        ).fetchone()[0]
+        assert new_score != 99.0, f"pin {pin} retained stale score_adu=99"
+        assert new_score != 88.0, f"pin {pin} retained stale score_adu=88"
+    conn.close()

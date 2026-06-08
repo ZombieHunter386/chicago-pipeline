@@ -221,21 +221,28 @@ def _score_one_profile(
     """Compute the per-profile score for every parcel and write to `column`."""
     conn = get_connection(db_path)
     try:
+        # Clear stale scores up-front so parcels that are no longer scoreable
+        # (or whose computed value changes) don't retain a prior value.
+        # Mirrors the same pattern in score_parcels (line ~172).
+        conn.execute(f"UPDATE parcels SET {column} = NULL")
         signal_cols = [s.signal for s in scoring_config.signals]
         select_cols = ", ".join(["pin"] + signal_cols)
         rows = conn.execute(f"SELECT {select_cols} FROM parcels").fetchall()
-        n = 0
+        # Accumulate (score, pin) tuples and batch via executemany — avoids
+        # ~67k individual UPDATE statements per profile (201k across 3 profiles).
+        # Mirrors the executemany pattern in score_parcels (line ~182).
+        updates: list[tuple[float, str]] = []
         for r in rows:
             parcel_dict = dict(r)
             pin = parcel_dict["pin"]
             score_value = score_parcel(parcel_dict, scoring_config)
-            conn.execute(
-                f"UPDATE parcels SET {column} = ? WHERE pin = ?",
-                (score_value, pin),
-            )
-            n += 1
+            updates.append((score_value, pin))
+        conn.executemany(
+            f"UPDATE parcels SET {column} = ? WHERE pin = ?",
+            updates,
+        )
         conn.commit()
-        return n
+        return len(updates)
     finally:
         conn.close()
 
