@@ -5,7 +5,7 @@
 **Goal:** Surface two new acquisition strategies alongside the existing value-add multifamily score:
 
 - **ADU profile** — extra-wide residential lots where the operator can plausibly add an Accessory Dwelling Unit. Constrained by lot size band (3,500–12,000 sf), lot width sweet spot, affordability ceiling, and the City's actual ADU-eligibility rules (zone-class based for RT/RM/B/C1/C2; polygon-lookup-based for RS-1/2/3).
-- **Redevelopment profile** — underutilized parcels with high `far_gap_delta`, no price cap. Different optimum than ADU (bigger is better, no upper lot size, expensive is fine).
+- **Redevelopment profile** — underutilized parcels with high `far_gap_delta` Different optimum than ADU (bigger is better, no upper lot size, expensive is fine).
 
 The existing `config/scoring.yaml` stays as the value-add multifamily profile — unchanged. New profiles add to the catalog rather than replacing.
 
@@ -51,14 +51,11 @@ ALTER TABLE parcels ADD COLUMN last_sale_price_recent REAL;    -- = last_sale_pr
                                                                 -- hold_duration_years <= 3, else NULL
 
 -- Per-profile scores written by the scoring engine (Phase 4)
-ALTER TABLE parcels ADD COLUMN score_value_add REAL;             -- replaces legacy 'score'
 ALTER TABLE parcels ADD COLUMN score_adu REAL;
 ALTER TABLE parcels ADD COLUMN score_redev REAL;
--- one-time backfill in the migration:
-UPDATE parcels SET score_value_add = score WHERE score IS NOT NULL;
 ```
 
-The legacy `score` column stays for one release as a back-compat shim (kept in sync with `score_value_add` via a trigger) so external queries don't break mid-migration. Removed in a follow-up cleanup PR after a sanity-check pass.
+The existing `score` column stays as the value-add profile's output (renamed conceptually but not in SQL — too many queries reference it by name).
 
 ### 2. Lot width / depth backfill
 
@@ -119,14 +116,17 @@ Refresh cadence: monthly (the City publishes updates infrequently). Document in 
 
 **Owner-occupancy assumption.** Hunter is acquiring with intent to live in either the main house or the ADU. This satisfies the "Owner Occupancy Limits" restriction text on roughly half the polygons. If a future operator plans pure-investment acquisition, the `adu_eligible` derivation needs a flag to exclude RS-with-owner-occ-restriction zones — flagged as an open question below.
 
-### 4. Scoring engine extension: one mechanism, every profile gets a column
+### 4. Scoring engine extension: multi-profile output only
 
-This subsumes and replaces the prior `--scoring-yaml` swap mechanism documented in `config/scoring_alternatives/lot_size_sf_positive.yaml`'s header. Going forward, **every scoring YAML gets its own profile column**, and the engine runs all registered profiles in one pass.
+The current YAML schema already supports everything the new profiles need at the signal level (continuous / binary, positive / negative, linear normalization). The only change is that the engine now reads multiple profile YAMLs in one pass and writes one `score_<profile>` column per YAML.
 
-**YAML schema** (one new top-level field — `profile_name`):
+**Engine signature change:** `score_parcels(db_path, scoring_config)` becomes `score_parcels(db_path, scoring_configs: list[(profile_name, scoring_config)])`. The current `score` column is preserved (the value-add profile writes to it). New profiles write to `score_adu` and `score_redev`.
+
+No filter parsing. No SQL WHERE clause appended. Every parcel gets every profile's score. Parcels that don't fit a strategy score low on its profile — that's the signal, not exclusion.
+
+The YAML schema stays minimal:
 ```yaml
 version: string
-profile_name: string             # determines the score_<profile_name> column to write
 top_n: integer
 signals:
   <signal_name>:
@@ -136,61 +136,27 @@ signals:
     normalization: {min: float, max: float}   # required for continuous
 ```
 
-**Engine signature change:** `score_parcels(db_path, scoring_config)` becomes `score_parcels(db_path, scoring_configs: list[ScoringConfig])`. Each config writes to `score_<profile_name>`. The canonical `config/scoring.yaml` keeps `profile_name: value_add` and writes to a `score_value_add` column (NOT the legacy `score` column — see migration note below).
-
-**Always-run profile registry** lives in `config/profile_defaults.yaml` (the same file as the per-profile recommended_filters — keeps everything profile-related in one place):
-```yaml
-profiles:                                 # ordered; first is the UI default
-  - name: value_add
-    yaml: config/scoring.yaml
-  - name: adu
-    yaml: config/scoring_adu.yaml
-  - name: redev
-    yaml: config/scoring_redev.yaml
-
-defaults:                                 # per-profile recommended filters (unchanged from §4b)
-  value_add:
-    recommended_filters: {}
-  adu:
-    recommended_filters: ...
-  redev:
-    recommended_filters: ...
-```
-
-**`--scoring-yaml` flag preserved for one-off experiments.** It accepts a `--profile-name <name>` companion that determines the column name to write (defaults to the YAML's own `profile_name` field if not given). Use case: `python -m pipeline.score --scoring-yaml my-experiment.yaml --profile-name tmp` writes `score_tmp` for ad-hoc comparison. Drop the column when done. No registration in `profile_defaults.yaml` required for experiments.
-
-**Migration of the legacy `score` column.** The existing `score` column (currently written by `config/scoring.yaml`) is renamed conceptually to `score_value_add` via a one-time data migration:
-```sql
-ALTER TABLE parcels ADD COLUMN score_value_add REAL;
-UPDATE parcels SET score_value_add = score;
--- the legacy `score` column stays for one release as a back-compat shim,
--- mirroring score_value_add via a trigger; removed in a follow-up cleanup PR
-```
-This keeps any external query that reads `score` working during the transition without a code freeze. The UI dropdown immediately uses `score_value_add`.
-
-No filter parsing. No SQL WHERE clause appended. Every parcel gets every profile's score. Parcels that don't fit a strategy score low on its profile — that's the signal, not exclusion.
-
 ### 4b. Profile filter defaults
 
-Defined in the same `config/profile_defaults.yaml` as the always-run registry (full example shown in §4 above). Each registered profile gets a `recommended_filters` block:
+A separate config file maps profile names to recommended UI filters:
 
 ```yaml
-defaults:
-  value_add:
-    recommended_filters: {}            # default: no auto-applied filters
+# config/profile_defaults.yaml
+value_add:
+  recommended_filters: {}            # default: no auto-applied filters
 
-  adu:
-    recommended_filters:
-      adu_eligible: 1
-      is_condo_unit: 0
-      lot_size_sf: {between: [3500, 12000]}
-      lot_width_ft: {not_null: true}
+adu:
+  recommended_filters:
+    adu_eligible: 1
+    is_condo_unit: 0
+    lot_size_sf: {between: [3500, 12000]}
+    lot_width_ft: {not_null: true}
 
-  redev:
-    recommended_filters:
-      is_condo_unit: 0
-      lot_size_sf: {min: 5000}
-      zone_class: {prefix_in: ["RT-", "RM-", "B", "C"]}
+redev:
+  recommended_filters:
+    is_condo_unit: 0
+    lot_size_sf: {min: 5000}
+    zone_class: {prefix_in: ["RT-", "RM-", "B", "C"]}
 ```
 
 The webapp loads this at startup and exposes the per-profile defaults via the parcels list route. When the operator picks a profile in the dropdown, the frontend merges these defaults into the URL filter state. Operators can toggle any of them off afterward — the URL is the source of truth, defaults are just the initial values.
@@ -263,7 +229,7 @@ signals:
     weight: 0.15
     kind: continuous
     direction: positive
-    normalization: {min: 5000, max: 50000}
+    normalization: {min: 1000, max: 50000}
   max_far:
     weight: 0.10
     kind: continuous
@@ -274,15 +240,10 @@ signals:
     kind: binary
     direction: positive                        # POSITIVE here — opposite of value-add profile
   cta_distance_ft:
-    weight: 0.10
+    weight: 0.15
     kind: continuous
     direction: negative                        # closer to CTA = better
-    normalization: {min: 500, max: 4000}
-  hold_duration_years:
-    weight: 0.05
-    kind: continuous
-    direction: positive
-    normalization: {min: 5, max: 30}
+    normalization: {min: 0, max: 4000}
 ```
 
 Weights sum to 1.00. Auto-applied filters (in `profile_defaults.yaml`): `is_condo_unit=0`, `lot_size_sf >= 5000`, `zone_class` starts with `RT-` / `RM-` / `B` / `C`.
@@ -363,39 +324,32 @@ Six PRs, each independently mergeable. Each phase's PR description references th
 
 | Phase | Deliverable | Tests | Gate before next phase |
 |---|---|---|---|
-| 1 | Schema migration: add 9 new columns to `parcels` (including `score_value_add` for the legacy `score` migration); init_db idempotent | New columns persist after `pipeline init`; legacy `score` mirror via trigger | All existing tests green; `SELECT score, score_value_add FROM parcels` returns equal values |
+| 1 | Schema migration: add 8 new columns to `parcels`; init_db idempotent | New columns persist after `pipeline init` | All existing tests green |
 | 2 | Lot width backfill: extend `sources/ccgis_parcels.py` + one-time backfill run | Polygon math + DB write | Hunter spot-checks `lot_width_ft` for 5 known parcels |
 | 3 | ADU enrichment loader: new `sources/chicago_adu_zones.py` + spatial join + `adu_eligible` / `adu_restriction_text` derivation | Spatial join + derivation logic | Hunter spot-checks `adu_eligible` for an RS parcel inside vs outside a polygon |
-| 4 | Scoring engine extension: per-profile column output + `profile_name` YAML field + `--profile-name` CLI companion. Two new YAML files (adu, redev). `config/scoring.yaml` gains `profile_name: value_add`. `profile_defaults.yaml` (always-run registry + recommended_filters). `filter_schema.py` registers new filterable columns. Back-compat trigger keeps legacy `score` mirroring `score_value_add`. | Multi-profile run writes one column per registered YAML; experimental `--scoring-yaml --profile-name tmp` writes `score_tmp`; profile defaults loader; new filter columns work via `/api/parcels`; legacy `score` mirror trigger | **Hunter explicitly approves the proposed signal weights before merging.** Until merged, `score_adu` / `score_redev` columns stay NULL. |
+| 4 | Scoring engine extension: multi-profile output. Two new YAML files. `profile_defaults.yaml`. `filter_schema.py` registers new filterable columns. | Multi-profile run; profile defaults loader; new filter columns work via `/api/parcels` | **Hunter explicitly approves the proposed signal weights before merging.** Until merged, `score_adu` / `score_redev` columns stay NULL. |
 | 5 | UI profile dropdown + auto-apply recommended filters + route serves `/api/profile-defaults` | Frontend selection behavior + filter auto-merge | Hunter reviews UX |
 | 6 | End-to-end data refresh: rerun fetch_all → analyze → score across all 3 profiles; present top-20 per profile for sanity check | Smoke run produces expected pool sizes (~3-5k ADU, ~10-15k redev) | Hunter confirms top-20 lists look right before any outreach is initiated against them |
 
 ---
 
-## Risks and open questions
+## Confirmations
 
 **1. Lot width approximation for irregular parcels.** `minimum_rotated_rectangle` over-states width on L-shaped, wedge, or corner lots by up to ~10%. The ~1,500–2,000 irregular parcels in the DB will have slightly inflated `lot_width_ft`. Acceptable because scoring cares about ordering, not exact dimensions. Mitigation: surface the polygon area : MBR area ratio as a "shape regularity" metric in a future iteration if this proves to mis-rank candidates.
 
-**2. ADU map staleness.** The City publishes the polygon layer infrequently (months between updates). Our `adu_restriction_text` could lag the actual ordinance state. Mitigation: monthly refresh cron; the loader logs the fetch timestamp into `raw_chicago_adu_zones.fetched_at` so the data age is observable.
+**2. ADU map staleness.** The City publishes the polygon layer infrequently (months between updates). Our `adu_restriction_text` could lag the actual ordinance state. Hunter will manually refresh with Claude
 
-**3. Owner-occupancy assumption baked into eligibility.** This design treats RS-zoned parcels in "Owner Occupancy Limits" polygons as ADU-eligible because Hunter plans to owner-occupy. A future operator with a pure-investment thesis would need `derive_adu_eligible` to take an `assume_owner_occupied: bool` parameter and gate RS+owner-occ-restriction zones accordingly. Out of scope for v1.
-
-**4. AVM (Zillow / RealEstateAPI / ATTOM) deferred.** Hunter asked about a true $1.5M affordability ceiling via AVM. This spec uses `last_sale_price_recent` (≤3 years old) as a proxy; missing/stale prices get neutral scoring (0.5) instead of penalized. A future spec adds AVM enrichment (~$0.10/parcel × 67k = ~$6,700 one-time, plus refresh cadence). Flagged as a separate ticket — does not block this work.
-
-**5. "Annual Limits" zones for RS parcels.** Modeled as a 0.10-weighted negative binary signal (`adu_has_annual_limits`). If Hunter finds the annual cap rarely blocks deals in practice, drop the signal in a follow-up. If it blocks deals frequently, promote to a hard filter.
-
-**6. Top-N tuning.** Set to 20 for both new profiles to match the existing value-add cap. If the ADU or redev list runs dry (operator works through 20 in a few weeks), bump per-profile in a config change — no code or schema work needed.
-
-**7. Legacy `score` column migration.** The legacy `score` column (currently the only score) is moving to `score_value_add`. A trigger keeps `score` mirroring `score_value_add` for one release as a back-compat shim — external queries / scripts / notebooks that read `score` keep working during the transition. Cleanup PR drops the legacy column after a sanity check (~1 week after Phase 4 lands). Risk: anything that *writes* to `score` directly (none in the current codebase, but possible in untracked notebooks) would silently lose its write when the column is dropped. Mitigation: the trigger is one-way (`score_value_add` → `score`) so direct writes to `score` get clobbered by the trigger; document this clearly in the migration PR.
+**3. Top-N tuning.** Set to 20 for both new profiles to match the existing value-add cap. If the ADU or redev list runs dry (operator works through 20 in a few weeks), bump per-profile in a config change — no code or schema work needed.
 
 ---
 
 ## Out of scope
 
-- A "compare across profiles" view in the UI. The single dropdown ranks by one profile; cross-profile comparison stays a future feature (the data is there — every parcel has every profile's score column — but no UI surface for it yet).
+- Bulk scoring CLI flags (per-profile invocation, etc.) — engine runs all profiles every refresh, no CLI surface needed.
+- A "compare across profiles" view in the UI. The single dropdown ranks by one profile; cross-profile comparison stays a future feature.
 - Outreach template variants per profile. Templates stay shared; profile only affects which parcels appear in the queue.
-- Removal of the legacy `score` column. Phase 4 ships the back-compat trigger; the actual column drop is a follow-up cleanup PR after ~1 week of sanity-check.
-
+- Migration of historical `score` values to `score_value_add`. The existing column name persists; documentation notes the equivalence.
+- Zillow scrape and or Current Market Sales MLS system data. 
 ---
 
 ## What gets committed before Phase 4
