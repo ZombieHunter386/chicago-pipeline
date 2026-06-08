@@ -296,3 +296,27 @@ def test_init_db_creates_outreach_unique_touch_contact_index(tmp_path):
     conn.execute("INSERT INTO outreach (pin) VALUES (?)", ("14210010010000",))
     conn.commit()
     conn.close()
+
+
+def test_init_db_adds_scoring_profile_columns(tmp_path):
+    """Phase 1 of the scoring-profiles plan adds 8 columns to parcels:
+    2 lot-geometry, 3 ADU-eligibility, 1 derived sale-price, 2 score
+    columns. init_db must be idempotent on a fresh and a pre-existing DB."""
+    from pipeline.db import init_db
+    import sqlite3
+    p = tmp_path / "t.db"
+    init_db(p)
+    # Re-init on existing DB must not raise.
+    init_db(p)
+
+    conn = sqlite3.connect(p)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(parcels)")}
+    expected = {
+        "lot_width_ft", "lot_depth_ft",
+        "adu_eligible", "adu_restriction_text", "adu_has_annual_limits",
+        "last_sale_price_recent",
+        "score_adu", "score_redev",
+    }
+    missing = expected - cols
+    assert not missing, f"missing columns: {missing}"
+    conn.close()

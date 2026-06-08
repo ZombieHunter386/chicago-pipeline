@@ -502,6 +502,20 @@ _LATER_COLUMNS = {
         # outreach_paused=1 stops the cadence engine from surfacing this parcel
         # in Due Today. Manually toggled via POST /api/parcels/<pin>/pause.
         ("outreach_paused", "INTEGER DEFAULT 0"),
+        # Scoring profiles (2026-06-08 spec): ADU + Redevelopment.
+        # ---- Phase 1 (schema). Populated in later phases:
+        # Lot geometry from CCGIS polygons (populated in Phase 2).
+        ("lot_width_ft", "REAL"),
+        ("lot_depth_ft", "REAL"),
+        # ADU eligibility from City ArcGIS layer + zone_class derivation (Phase 3).
+        ("adu_eligible", "INTEGER"),
+        ("adu_restriction_text", "TEXT"),
+        ("adu_has_annual_limits", "INTEGER"),
+        # Derived from last_sale_price + hold_duration_years (Phase 4, in pipeline/score.py).
+        ("last_sale_price_recent", "REAL"),
+        # Per-profile scores written by the scoring engine (Phase 4).
+        ("score_adu", "REAL"),
+        ("score_redev", "REAL"),
     ),
     # Gmail message id from successful sends; null for manual touches.
     # Replaces the prior "shove it into notes" hack — clean column, one
