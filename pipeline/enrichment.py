@@ -16,44 +16,11 @@ LLC-pierce step because Tracerfy advanced mode covers LLC-owned parcels
 directly at the same per-hit cost.
 """
 from __future__ import annotations
-import re
 from dataclasses import dataclass
 from typing import Protocol
 
 
 # ---------- Pure helpers ----------
-
-def split_owner_name(raw: str) -> tuple[str, str]:
-    """Split assessor `owner_name` into (first, last) for Tracerfy normal mode.
-
-    Assessor names come in shouty caps and varied formats:
-      - 'JOHN SMITH'             → ('John', 'Smith')
-      - 'MARY ELLEN JONES'       → ('Mary', 'Ellen Jones')  (first token + rest)
-      - 'SMITH'                  → ('', 'Smith')             (one token → last)
-      - 'SMITH JOHN TR'          → ('Smith', 'John Tr')      (trustee suffix kept)
-      - 'JOHN ALDEN MORRIS 812'  → ('John', 'Alden Morris')  (unit bleed stripped)
-
-    Capitalization: title-cased so Tracerfy doesn't reject for casing. The
-    one-token-only case returns first='' (Tracerfy may still hit via the
-    last_name alone — and the cost of a miss is $0 anyway).
-    """
-    s = re.sub(r"\s+", " ", (raw or "").strip())
-    if not s:
-        return ("", "")
-    tokens = s.split(" ")
-    # ~2.3% of non-LLC owner_name strings carry a trailing unit number
-    # from the unit column ('JOHN ALDEN MORRIS 812'); Tracerfy normal
-    # mode misses when the last name carries a number. Only strip when
-    # 2+ tokens remain so ambiguous 2-token cases ('SMITH 812') survive.
-    while len(tokens) >= 3 and tokens[-1].isdigit():
-        tokens.pop()
-    s = " ".join(tokens)
-    parts = s.split(" ", 1)
-    if len(parts) == 1:
-        return ("", parts[0].title())
-    first, rest = parts
-    return (first.title(), rest.title())
-
 
 def alive_emails_for_parcel(contacts: list[dict]) -> list[str]:
     """Returns emails from contact rows where dead=0 and wrong_person=0."""
@@ -273,19 +240,20 @@ def _enrich_one_pin(conn, job_id: int, pin: str,
                     provider: EnrichmentProvider) -> EnrichmentResult:
     """Run one provider lookup for one pin and persist the results.
 
-    Picks the lookup mode based on parcels.is_llc:
-      - is_llc=0 → split owner_name into first/last and call normal mode.
-        If normal returns no_match, automatically retry in advanced mode
-        (address-only) to catch stale/wrong assessor owner_name cases
-        (church entities, unit-suffix bleed, deceased owners). Cost is
-        $0 for the missed normal call + $0.10 only if advanced hits.
-      - is_llc=1 → omit names, call advanced mode (address-only) directly.
+    Always uses advanced mode (find_owner=true, address-only) regardless
+    of parcels.is_llc. Advanced is equal-or-better than normal mode in
+    every scenario:
+      - Owner-occupied with accurate name → returns owner + household
+        (often 2-3 contacts) instead of just the owner.
+      - Owner stale/deceased/moved → finds current residents (normal
+        would miss).
+      - LLC / trust / church entity → name was useless anyway; address
+        finds the actual humans.
 
-    Both provider calls (when fallback fires) are persisted to
-    enrichment_results for audit — operator sees 'normal missed, advanced
-    succeeded' in the per-pin history. The returned EnrichmentResult is
-    the LAST result (the one that may have contacts), so the endpoint's
-    status check + the in-memory _persist_contacts call work the same.
+    Cost is identical ($0.10 per hit, $0 per miss) and we get more
+    contacts per dollar. The owner_first_name / owner_last_name fields
+    on the provider Protocol stay supported for any future caller that
+    wants by-name precision, but the orchestrator no longer uses them.
 
     Returns the EnrichmentResult so the single-pin endpoint can surface
     provider errors (status='error') as HTTP 502 instead of silently
@@ -304,46 +272,18 @@ def _enrich_one_pin(conn, job_id: int, pin: str,
     # Cook County mail_address strings are usually street-only; the parser
     # can't recover city/state/zip from them. Supply Chicago defaults plus
     # the parcel's own zip_code so the provider has something to send.
-    defaults = dict(
+    result = provider.lookup(
+        mail_address=mail,
         default_city="Chicago",
         default_state="IL",
         default_zip=parcel["zip_code"] or "",
     )
-
-    def _run_advanced() -> EnrichmentResult:
-        adv_result = provider.lookup(mail_address=mail, **defaults)
-        _save_enrichment_result(
-            conn, pin=pin, job_id=job_id, lookup_type="skip_trace_advanced",
-            query_name=parcel["owner_name"], query_mail_address=mail,
-            result=adv_result,
-        )
-        _persist_contacts(conn, pin, adv_result)
-        return adv_result
-
-    if parcel["is_llc"]:
-        return _run_advanced()
-
-    # Non-LLC: normal mode first, fall back to advanced on no_match.
-    first, last = split_owner_name(parcel["owner_name"] or "")
-    result = provider.lookup(
-        mail_address=mail,
-        owner_first_name=first, owner_last_name=last,
-        **defaults,
-    )
     _save_enrichment_result(
-        conn, pin=pin, job_id=job_id, lookup_type="skip_trace_normal",
+        conn, pin=pin, job_id=job_id, lookup_type="skip_trace_advanced",
         query_name=parcel["owner_name"], query_mail_address=mail,
         result=result,
     )
     _persist_contacts(conn, pin, result)
-
-    # Auto-fallback: stale/wrong owner_name often misses in normal mode
-    # but the address still has current residents. Tracerfy charges per
-    # hit ($0 on miss), so retrying costs nothing extra unless advanced
-    # actually finds someone. Only no_match triggers fallback —
-    # status='error' is a different failure mode that wouldn't benefit.
-    if result.status == "no_match":
-        return _run_advanced()
     return result
 
 

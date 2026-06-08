@@ -34,21 +34,21 @@ def seeded_db(tmp_path: Path) -> Path:
 
 
 class StubSkipProvider:
-    """Records every lookup call so tests can assert on mode + args."""
+    """Records every lookup call so tests can assert on args + derive a
+    distinct synthetic person per address. Mirrors the production
+    behavior where _enrich_one_pin always calls advanced mode (no
+    owner_first_name / owner_last_name)."""
     name = "stub"
     cost_per_lookup_usd = 0.10
     def __init__(self):
         self.calls = []
-    def lookup(self, *, mail_address, owner_first_name=None,
-               owner_last_name=None, **_defaults):
-        first = (owner_first_name or "").strip()
-        last = (owner_last_name or "").strip()
-        mode = "normal" if (first and last) else "advanced"
-        self.calls.append({"mode": mode, "address": mail_address,
-                           "first": first, "last": last,
-                           "defaults": _defaults})
-        person = f"{first} {last}".strip() or "Resident One"
-        email = f"{person.lower().replace(' ', '.')}@x.com"
+    def lookup(self, *, mail_address, **_kwargs):
+        self.calls.append({"address": mail_address, "kwargs": _kwargs})
+        # First token of the street number gives every pin a unique person
+        # so tests can still distinguish contacts per parcel.
+        marker = mail_address.split()[0] if mail_address else "anon"
+        person = f"Resident {marker}"
+        email = f"resident-{marker}@x.com"
         return EnrichmentResult(
             contacts=[
                 EnrichmentContact(value=email, kind="email",
@@ -65,8 +65,9 @@ class StubSkipProvider:
 
 
 def test_run_bulk_enrichment_happy_path(seeded_db):
-    """Three pins: one human owner (normal mode), one LLC (advanced mode),
-    one already-enriched (skipped)."""
+    """Three pins: two new (both go through advanced mode now, regardless
+    of is_llc), one already-enriched (skipped). Verifies pin checkpointing,
+    contact persistence, and the address-based stub's per-pin output."""
     pins = ["14000000000001", "14000000000002", "14000000000003"]
     skip = StubSkipProvider()
     budget = BudgetCap(soft_daily_usd=100.0, hard_per_run_usd=100.0)
@@ -92,19 +93,18 @@ def test_run_bulk_enrichment_happy_path(seeded_db):
         assert job["status"] == "complete"
 
         assert len(skip.calls) == 2
-        modes = sorted(c["mode"] for c in skip.calls)
-        assert modes == ["advanced", "normal"]
 
         contacts_1 = conn.execute(
             "SELECT * FROM contacts WHERE pin='14000000000001'"
         ).fetchall()
-        assert {c["email"] for c in contacts_1 if c["email"]} == {"john.smith@x.com"}
+        # Stub keys email off the address ('111 Main St' → resident-111@x.com)
+        assert {c["email"] for c in contacts_1 if c["email"]} == {"resident-111@x.com"}
         assert {c["phone"] for c in contacts_1 if c["phone"]} == {"3125550100"}
 
         contacts_2 = conn.execute(
             "SELECT * FROM contacts WHERE pin='14000000000002'"
         ).fetchall()
-        assert {c["email"] for c in contacts_2 if c["email"]} == {"resident.one@x.com"}
+        assert {c["email"] for c in contacts_2 if c["email"]} == {"resident-222@x.com"}
 
         contacts_3 = conn.execute(
             "SELECT * FROM contacts WHERE pin='14000000000003'"
@@ -148,7 +148,8 @@ def test_run_bulk_enrichment_resumes_from_checkpoint(seeded_db):
     )
 
     assert len(skip.calls) == 1
-    assert skip.calls[0]["mode"] == "advanced"
+    # Resumed run picks up the un-done pin (LLC 222 Main St)
+    assert skip.calls[0]["address"] == "222 Main St"
 
 
 def test_run_bulk_enrichment_pauses_on_budget(seeded_db):
