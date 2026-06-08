@@ -20,6 +20,8 @@ ALLOWED_FILTER_COLUMNS = {
     "unit_count", "is_scofflaw", "scofflaw_appearances_count",
     "vacant_violations_count", "vacant_violations_amount_due",
     "building_sf_source", "condition_source",
+    # Added with Phase 5 operator fix (lot_width_ft needed for not_null filter)
+    "lot_width_ft", "adu_eligible",
 }
 
 ALLOWED_STAGES = {"scored", "outreach", "responded", "introduced", "dead"}
@@ -202,15 +204,41 @@ def _build_where(
                 clauses.append(f"{col} IN ({placeholders})")
                 params.extend(value)
         elif isinstance(value, dict):
-            # range: {"min": x, "max": y}  -- either may be absent
-            mn = value.get("min")
-            mx = value.get("max")
-            if mn is not None:
-                clauses.append(f"{col} >= ?")
-                params.append(mn)
-            if mx is not None:
-                clauses.append(f"{col} <= ?")
-                params.append(mx)
+            # Dispatch on the first recognised operator key.
+            # Precedence: between > min/max > not_null > prefix_in > in.
+            if "between" in value:
+                lo, hi = value["between"]
+                clauses.append(f"{col} BETWEEN ? AND ?")
+                params.extend([lo, hi])
+            elif "min" in value or "max" in value:
+                # range: {"min": x, "max": y}  -- either may be absent
+                mn = value.get("min")
+                mx = value.get("max")
+                if mn is not None:
+                    clauses.append(f"{col} >= ?")
+                    params.append(mn)
+                if mx is not None:
+                    clauses.append(f"{col} <= ?")
+                    params.append(mx)
+            elif value.get("not_null") is True:
+                clauses.append(f"{col} IS NOT NULL")
+            elif "prefix_in" in value:
+                prefixes = value["prefix_in"]
+                if prefixes:
+                    like_clauses = " OR ".join(f"{col} LIKE ?" for _ in prefixes)
+                    clauses.append(f"({like_clauses})")
+                    params.extend(f"{p}%" for p in prefixes)
+                else:
+                    clauses.append("1 = 0")
+            elif "in" in value:
+                vals = value["in"]
+                if vals:
+                    placeholders = ",".join("?" * len(vals))
+                    clauses.append(f"{col} IN ({placeholders})")
+                    params.extend(vals)
+                else:
+                    clauses.append("1 = 0")
+            # else: unknown operator — skip silently rather than crash
         elif isinstance(value, (int, float)):
             clauses.append(f"{col} = ?")
             params.append(value)

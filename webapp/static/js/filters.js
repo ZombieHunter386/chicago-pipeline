@@ -299,9 +299,17 @@ window.filterStateToQuery = function() {
     else if (val === false) params.set(col, 'false');
     else if (Array.isArray(val)) {
       val.forEach(v => params.append(col, v));
-    } else if (typeof val === 'object') {
-      if (val.min != null) params.set(`${col}.min`, val.min);
-      if (val.max != null) params.set(`${col}.max`, val.max);
+    } else if (typeof val === 'object' && val !== null) {
+      // {min, max} range — keep the legacy dot-notation so existing URL links
+      // aren't broken. All other complex operators (between, not_null,
+      // prefix_in, in) are JSON-encoded as a single ?col=<json> param.
+      const keys = Object.keys(val);
+      if (keys.length > 0 && keys.every(k => k === 'min' || k === 'max')) {
+        if (val.min != null) params.set(`${col}.min`, val.min);
+        if (val.max != null) params.set(`${col}.max`, val.max);
+      } else {
+        params.set(col, JSON.stringify(val));
+      }
     } else {
       params.set(col, val);
     }

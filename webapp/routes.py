@@ -3,6 +3,7 @@ import re
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from flask import Flask, abort, current_app, jsonify, redirect, render_template, request, url_for
@@ -24,6 +25,20 @@ from webapp.parcel_query import (
 
 
 UI_FILTERS_YAML = Path(__file__).resolve().parent.parent / "config" / "ui_filters.yaml"
+
+from pipeline.profile_defaults import load_profile_defaults as _load_profile_defaults_raw
+
+
+@lru_cache(maxsize=4)
+def _load_profile_defaults_cached(path_str: str) -> dict:
+    """Parse profile_defaults.yaml once per path and cache the result.
+
+    YAML parsing is cheap but there's no reason to re-read the file on every
+    /api/parcels and /api/profile-defaults request — the file only changes
+    when the operator edits it (which requires a server restart anyway).
+    """
+    return _load_profile_defaults_raw(Path(path_str))
+
 
 DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 1000
@@ -108,8 +123,7 @@ def register(app: Flask) -> None:
         recommended_filters, ...}}. The UI uses this to populate the
         profile dropdown + auto-apply recommended filters when the
         operator picks a profile."""
-        from pipeline.profile_defaults import load_profile_defaults
-        out = load_profile_defaults(Path(app.config["PROFILE_DEFAULTS_PATH"]))
+        out = _load_profile_defaults_cached(str(app.config["PROFILE_DEFAULTS_PATH"]))
         return jsonify(out)
 
     @app.get("/api/scoring-config")
@@ -144,8 +158,7 @@ def register(app: Flask) -> None:
         # Resolves via profile_defaults.yaml registry; unknown profile → 400.
         profile_param = request.args.get("profile")
         if profile_param:
-            from pipeline.profile_defaults import load_profile_defaults
-            profiles = load_profile_defaults(Path(app.config["PROFILE_DEFAULTS_PATH"]))
+            profiles = _load_profile_defaults_cached(str(app.config["PROFILE_DEFAULTS_PATH"]))
             if profile_param not in profiles:
                 abort(400, f"unknown profile: {profile_param}")
             sort = profiles[profile_param]["score_column"]
@@ -1191,14 +1204,27 @@ def _parse_filters(args) -> dict[str, Any]:
       ?property_class=211&property_class=212    -> {"property_class": ["211","212"]}
       ?hold_duration_years.min=20               -> {"hold_duration_years": {"min": 20.0}}
       ?hold_duration_years.max=30
+      ?lot_size_sf={"between":[3500,12000]}     -> {"lot_size_sf": {"between": [3500, 12000]}}
+      ?zone_class={"prefix_in":["RT-","RM-"]}   -> {"zone_class": {"prefix_in": ["RT-", "RM-"]}}
+      ?lot_width_ft={"not_null":true}           -> {"lot_width_ft": {"not_null": True}}
+
+    The JSON-object encoding is produced by filterStateToQuery() in filters.js
+    for complex operators (between, not_null, prefix_in, in) that don't have
+    a dedicated dot-suffix scheme.
     """
+    import json as _json
+
+    # Operators that are safe to accept as JSON-decoded dicts.
+    ALLOWED_DICT_OPERATORS = {"between", "min", "max", "not_null", "prefix_in", "in"}
+
     filters: dict[str, Any] = {}
     seen_keys: set[str] = set()
     for key in args.keys():
         if key in seen_keys:
             continue
         seen_keys.add(key)
-        if key in {"limit", "offset", "stage", "sort", "dir", "include_condo_units"}:
+        if key in {"limit", "offset", "stage", "sort", "dir", "include_condo_units",
+                   "top_n_only", "profile", "categories"}:
             continue
 
         if "." in key:
@@ -1225,6 +1251,21 @@ def _parse_filters(args) -> dict[str, Any]:
             filters[key] = True
         elif value.lower() in {"false", "0"}:
             filters[key] = False
+        elif value.startswith("{"):
+            # Attempt to decode as a JSON operator dict
+            try:
+                decoded = _json.loads(value)
+            except (_json.JSONDecodeError, ValueError):
+                filters[key] = value
+                continue
+            if not isinstance(decoded, dict):
+                filters[key] = value
+                continue
+            # Reject any key not in the allowed operator set to prevent
+            # unexpected dict shapes from reaching _build_where.
+            if not all(k in ALLOWED_DICT_OPERATORS for k in decoded):
+                continue
+            filters[key] = decoded
         else:
             filters[key] = value
 

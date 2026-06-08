@@ -40,14 +40,12 @@
   let registry = {};
 
   // Merge a profile's recommended_filters into FilterState.filters without
-  // overwriting keys the user has already set. Only simple scalar values
-  // (boolean, number, string) are merged — complex filter objects (between,
-  // not_null, prefix_in) are skipped because the existing filter system
-  // doesn't support them and they'd confuse the backend _parse_filters logic.
+  // overwriting keys the user has already set. Scalar and complex object
+  // values (between, not_null, prefix_in, in, min, max) are all supported
+  // now that _build_where handles them on the backend.
   function mergeRecommendedFilters(recommended) {
     for (const [col, val] of Object.entries(recommended || {})) {
       if (col in window.FilterState.filters) continue; // user-set wins
-      if (typeof val === 'object' && val !== null) continue; // skip complex
       // Normalise: 1/0 integers → booleans for boolean columns
       if (val === 1) window.FilterState.filters[col] = true;
       else if (val === 0) window.FilterState.filters[col] = false;

@@ -8,6 +8,13 @@
 # below are not yet committed — they ship in Phase 4b after Hunter
 # approves the proposed weights.
 
+# Filter values may be scalars (applied as equality) or dicts with one of:
+#   {between: [a, b]}    — column BETWEEN a AND b
+#   {min: x}             — column >= x
+#   {max: x}             — column <= x
+#   {not_null: true}     — column IS NOT NULL
+#   {prefix_in: [a, b]}  — column LIKE 'a%' OR column LIKE 'b%' OR ...
+#   {in: [a, b, c]}      — column IN (a, b, c)
 value_add:
   yaml: scoring.yaml
   score_column: score
