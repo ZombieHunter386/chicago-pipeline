@@ -1,5 +1,5 @@
 # Registry of scoring profiles + per-profile recommended UI filters.
-# - `yaml`: path to the scoring YAML (relative to project root)
+# - `yaml`: bare filename of the scoring YAML inside config/ (resolved through CONFIG_DIR)
 # - `score_column`: parcels column the profile's score is written to
 # - `recommended_filters`: filter defaults auto-applied when the profile
 #   is selected in the UI dropdown (non-destructive — user-set filters win).
@@ -9,12 +9,12 @@
 # approves the proposed weights.
 
 value_add:
-  yaml: config/scoring.yaml
+  yaml: scoring.yaml
   score_column: score
   recommended_filters: {}
 
 adu:
-  yaml: config/scoring_adu.yaml
+  yaml: scoring_adu.yaml
   score_column: score_adu
   recommended_filters:
     adu_eligible: 1
@@ -23,7 +23,7 @@ adu:
     lot_width_ft: {not_null: true}
 
 redev:
-  yaml: config/scoring_redev.yaml
+  yaml: scoring_redev.yaml
   score_column: score_redev
   recommended_filters:
     is_condo_unit: 0

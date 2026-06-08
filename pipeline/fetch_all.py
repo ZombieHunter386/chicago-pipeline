@@ -135,9 +135,9 @@ def run_all(geo: GeographyConfig, db_path: Path, app_token: str,
                         derive_last_sale_price_recent, db_path, db_path))
     # Score all registered profiles in one pass. profile_defaults.yaml is the
     # single source of truth for profile_name → yaml path → score_column.
-    profiles = load_profile_defaults(Path("config/profile_defaults.yaml"))
+    profiles = load_profile_defaults(CONFIG_DIR / "profile_defaults.yaml")
     profile_configs = [
-        (name, load_scoring_config(Path(body["yaml"])), body["score_column"])
+        (name, load_scoring_config(CONFIG_DIR / body["yaml"]), body["score_column"])
         for name, body in profiles.items()
     ]
 
