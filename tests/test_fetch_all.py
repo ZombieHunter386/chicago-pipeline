@@ -123,3 +123,31 @@ def test_run_all_runs_condo_rollup_after_consolidate(tmp_path, monkeypatch, geo)
     conn = get_connection(db)
     logged = {r[0] for r in conn.execute("SELECT source_name FROM fetch_log").fetchall()}
     assert "condo_rollup" in logged
+
+
+@responses.activate
+def test_run_all_scores_all_profiles(tmp_path, monkeypatch, geo):
+    """After a full run, score / score_adu / score_redev are all non-NULL on
+    at least one parcel, and fetch_log contains the scoring step."""
+    db = tmp_path / "pipeline.db"
+    from pipeline.db import init_db
+    init_db(db)
+    _register_all(monkeypatch)
+    monkeypatch.setattr("sources.clerk_delinquent.DEFAULT_CSV_PATH", FIXTURES / "delinquent.csv")
+
+    results = fetch_all.run_all(geo, db, app_token="TKN")
+
+    # Scoring step must appear and succeed
+    source_names = [r.source_name for r in results]
+    assert "score (all profiles)" in source_names
+    scoring_result = next(r for r in results if r.source_name == "score (all profiles)")
+    assert scoring_result.status == "ok"
+
+    # All three score columns should be populated on at least one parcel
+    conn = get_connection(db)
+    for col in ("score", "score_adu", "score_redev"):
+        n = conn.execute(
+            f"SELECT COUNT(*) FROM parcels WHERE {col} IS NOT NULL"
+        ).fetchone()[0]
+        assert n >= 1, f"Expected at least one parcel with {col} populated"
+    conn.close()

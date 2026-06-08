@@ -15,6 +15,12 @@ from pipeline.db import init_db, get_connection
 from pipeline.socrata import SocrataClient
 from pipeline.consolidate import consolidate
 from pipeline.condo_rollup import rollup_condos
+from pipeline.profile_defaults import load_profile_defaults
+from pipeline.score import (
+    derive_last_sale_price_recent,
+    load_scoring_config,
+    score_parcels_multi,
+)
 
 from sources import (
     assessor_parcels, assessor_addresses, assessor_characteristics,
@@ -122,6 +128,26 @@ def run_all(geo: GeographyConfig, db_path: Path, app_token: str,
                         chicago_adu_zones.fetch, db_path, db_path))
     results.append(_run("chicago_adu_zones (apply)",
                         chicago_adu_zones.apply_to_parcels, db_path, db_path))
+    # Derived columns the scoring engine reads (last_sale_price_recent = last_sale_price
+    # when hold_duration_years <= 3, else NULL). Must run before score_parcels_multi so
+    # the ADU profile's affordability signal has data.
+    results.append(_run("derive_last_sale_price_recent",
+                        derive_last_sale_price_recent, db_path, db_path))
+    # Score all registered profiles in one pass. profile_defaults.yaml is the
+    # single source of truth for profile_name → yaml path → score_column.
+    profiles = load_profile_defaults(Path("config/profile_defaults.yaml"))
+    profile_configs = [
+        (name, load_scoring_config(Path(body["yaml"])), body["score_column"])
+        for name, body in profiles.items()
+    ]
+
+    def _score_all_profiles(db_path: Path, profile_configs: list) -> int:
+        """Thin wrapper: score_parcels_multi returns {profile: n}, _run expects int."""
+        counts = score_parcels_multi(db_path, profile_configs)
+        return sum(counts.values())
+
+    results.append(_run("score (all profiles)",
+                        _score_all_profiles, db_path, db_path, profile_configs))
     return results
 
 
