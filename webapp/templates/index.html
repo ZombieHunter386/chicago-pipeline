@@ -11,6 +11,12 @@
 
 <div class="top-bar">
   <h1>Chicago Multifamily Pipeline</h1>
+  <div class="top-bar-controls">
+    <label for="profile-selector" style="color:#8b949e; font-size:11px; margin-right:4px;">Profile:</label>
+    <select id="profile-selector" class="profile-selector" aria-label="Select scoring profile">
+      <!-- options populated by JS from /api/profile-defaults -->
+    </select>
+  </div>
   <div class="meta" id="top-bar-meta" aria-live="polite">Score v N/A · loading… · Top 20 shown</div>
 </div>
 

@@ -10,6 +10,10 @@ window.FilterState = {
   // included; categories absent are excluded. Initial state mirrors the
   // checkboxes in the layers panel (all on).
   visibleCategories: new Set(['top', 'consolidated', 'outreach', 'other']),
+  // Active scoring profile — drives ?profile= on /api/parcels so the server
+  // sorts by the profile's score_column. null = no profile param sent (legacy
+  // default ordering).
+  profile: null,
 };
 
 window.filtersReady = (async function initFilters() {
@@ -308,6 +312,9 @@ window.filterStateToQuery = function() {
   }
   if (window.FilterState.topNOnly) {
     params.set('top_n_only', 'true');
+  }
+  if (window.FilterState.profile) {
+    params.set('profile', window.FilterState.profile);
   }
   // Pass active categories so the server filters list/map identically.
   // Skip when all 4 are visible (no-op filter).

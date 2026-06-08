@@ -5,6 +5,8 @@
   .top-bar { background: #161b22; border-bottom: 1px solid #30363d; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; height: 56px; }
   .top-bar h1 { font-size: 16px; font-weight: 600; color: #f0f6fc; }
   .top-bar .meta { font-size: 12px; color: #8b949e; }
+  .top-bar-controls { display: flex; align-items: center; }
+  .profile-selector { margin-left: 12px; padding: 4px 8px; background: #21262d; color: #c9d1d9; border: 1px solid #30363d; border-radius: 4px; font-size: 13px; }
 
   /* Due Today Banner */
   .due-today-banner { background: #1c2333; border-bottom: 1px solid #30363d; padding: 10px 20px; display: flex; align-items: center; gap: 16px; }
