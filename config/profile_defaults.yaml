@@ -1,0 +1,31 @@
+# Registry of scoring profiles + per-profile recommended UI filters.
+# - `yaml`: path to the scoring YAML (relative to project root)
+# - `score_column`: parcels column the profile's score is written to
+# - `recommended_filters`: filter defaults auto-applied when the profile
+#   is selected in the UI dropdown (non-destructive — user-set filters win).
+#
+# Note: the scoring_adu.yaml and scoring_redev.yaml files referenced
+# below are not yet committed — they ship in Phase 4b after Hunter
+# approves the proposed weights.
+
+value_add:
+  yaml: config/scoring.yaml
+  score_column: score
+  recommended_filters: {}
+
+adu:
+  yaml: config/scoring_adu.yaml
+  score_column: score_adu
+  recommended_filters:
+    adu_eligible: 1
+    is_condo_unit: 0
+    lot_size_sf: {between: [3500, 12000]}
+    lot_width_ft: {not_null: true}
+
+redev:
+  yaml: config/scoring_redev.yaml
+  score_column: score_redev
+  recommended_filters:
+    is_condo_unit: 0
+    lot_size_sf: {min: 5000}
+    zone_class: {prefix_in: ["RT-", "RM-", "B", "C"]}
