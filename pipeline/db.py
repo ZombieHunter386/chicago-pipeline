@@ -372,10 +372,12 @@ CREATE TABLE IF NOT EXISTS raw_cdp_cta_stations (
     fetched_at TEXT
 );
 
--- Source 1H: Cook County GIS Parcel Boundaries (polygon area)
+-- Source 1H: Cook County GIS Parcel Boundaries (polygon area + dimensions)
 CREATE TABLE IF NOT EXISTS raw_ccgis_parcels (
     pin10 TEXT PRIMARY KEY,
     area_sf REAL,
+    width_ft REAL,
+    depth_ft REAL,
     fetched_at TEXT
 );
 
@@ -530,6 +532,12 @@ _LATER_COLUMNS = {
         ("combined_building_sf", "REAL"),
         ("score", "REAL"),
         ("score_version", "TEXT"),
+    ),
+    # Lot dimensions derived from minimum rotated rectangle (Phase 2).
+    # Added alongside the CREATE TABLE change so existing DBs gain them.
+    "raw_ccgis_parcels": (
+        ("width_ft", "REAL"),
+        ("depth_ft", "REAL"),
     ),
     # Keep BOTH the largest-card and the summed-card values on the raw
     # characteristics row so we can compare 'assessor sum vs largest vs
