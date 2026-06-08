@@ -40,6 +40,31 @@ SOURCE_NAME = "ccgis_parcels"
 PLANAR_CRS = "EPSG:3435"
 
 
+def _polygon_to_width_depth(geom) -> tuple[float, float]:
+    """Compute (width, depth) of a polygon in its native CRS units by
+    taking the side lengths of its minimum rotated rectangle.
+
+    Width is always the shorter side; depth the longer. For Chicago lots
+    in EPSG:3435 (US survey feet) this is street frontage × lot depth.
+
+    For non-rectangular polygons (L-shape, wedge, corner), the minimum
+    rotated rectangle is an over-bounding rectangle, so width slightly
+    over-states the true narrow dimension. Acceptable for scoring per
+    the design spec — ordering of candidates matters, not exact dimensions.
+    """
+    mbr = geom.minimum_rotated_rectangle
+    if mbr.is_empty or mbr.geom_type != "Polygon":
+        return (0.0, 0.0)
+    coords = list(mbr.exterior.coords)
+    if len(coords) < 4:
+        return (0.0, 0.0)
+    # First three corners give us two adjacent sides.
+    p0, p1, p2 = coords[0], coords[1], coords[2]
+    side_a = ((p1[0] - p0[0]) ** 2 + (p1[1] - p0[1]) ** 2) ** 0.5
+    side_b = ((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2) ** 0.5
+    return (min(side_a, side_b), max(side_a, side_b))
+
+
 def fetch(geo: GeographyConfig, db_path: Path, client: SocrataClient) -> int:
     fetched_at = datetime.now(UTC).isoformat(timespec="seconds")
 

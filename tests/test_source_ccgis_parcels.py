@@ -1,11 +1,51 @@
 import json
+import math
+
 import responses
+from shapely.geometry import Polygon
 
 from sources import (
     assessor_parcels, assessor_characteristics, ccgis_parcels,
 )
 from pipeline.db import get_connection
 from tests.conftest import FIXTURES
+
+
+def test_polygon_to_width_depth_rectangular():
+    """A 25 ft × 125 ft rectangle (standard Chicago lot) returns
+    (width=25, depth=125) within 0.5 ft tolerance."""
+    from sources.ccgis_parcels import _polygon_to_width_depth
+    rect = Polygon([(0, 0), (25, 0), (25, 125), (0, 125)])
+    width, depth = _polygon_to_width_depth(rect)
+    assert abs(width - 25.0) < 0.5
+    assert abs(depth - 125.0) < 0.5
+
+
+def test_polygon_to_width_depth_irregular_does_not_crash():
+    """L-shaped polygon: function returns the minimum rotated rectangle
+    dimensions (slightly over-stating the parcel's usable width). Acceptable
+    per the spec — we just need it not to crash."""
+    from sources.ccgis_parcels import _polygon_to_width_depth
+    l_shape = Polygon([(0, 0), (30, 0), (30, 30), (20, 30), (20, 100), (0, 100)])
+    width, depth = _polygon_to_width_depth(l_shape)
+    assert width > 0
+    assert depth > 0
+    assert depth >= width  # depth is always the longer side
+
+
+def test_polygon_to_width_depth_rotated():
+    """A rectangle rotated 30 degrees should still report (width, depth)
+    correctly — minimum_rotated_rectangle aligns to the polygon, not the axes."""
+    from sources.ccgis_parcels import _polygon_to_width_depth
+    # 30 ft × 100 ft rectangle, rotated 30°
+    angle = math.radians(30)
+    cos, sin = math.cos(angle), math.sin(angle)
+    corners = [(0, 0), (30, 0), (30, 100), (0, 100)]
+    rotated = [(x * cos - y * sin, x * sin + y * cos) for x, y in corners]
+    rect = Polygon(rotated)
+    width, depth = _polygon_to_width_depth(rect)
+    assert abs(width - 30.0) < 0.5
+    assert abs(depth - 100.0) < 0.5
 
 
 def _seed_through_characteristics(db_path, geo, cook_client):
