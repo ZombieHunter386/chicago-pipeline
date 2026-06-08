@@ -139,7 +139,8 @@ def apply_to_parcels(db_path: Path) -> int:
       - parcels.adu_has_annual_limits: 1 if restriction_text contains
         'Annual Limits', else 0.
 
-    Returns the number of parcels updated.
+    Returns the number of parcels processed (each with-lat/lng parcel gets
+    an UPDATE, even if its values didn't change from the prior run).
 
     Implementation: load all polygons into memory (small — typically <100
     polygons), iterate parcels and test point-in-polygon. shapely's
@@ -168,7 +169,7 @@ def apply_to_parcels(db_path: Path) -> int:
             "WHERE lat IS NOT NULL AND lng IS NOT NULL"
         ).fetchall()
 
-        n_updated = 0
+        n_processed = 0
         for p in parcels:
             pt = Point(p["lng"], p["lat"])
             z = (p["zone_class"] or "").upper()
@@ -193,8 +194,8 @@ def apply_to_parcels(db_path: Path) -> int:
                 "WHERE pin = ?",
                 (eligible, restriction_text, has_annual_limits, p["pin"]),
             )
-            n_updated += 1
+            n_processed += 1
         conn.commit()
     finally:
         conn.close()
-    return n_updated
+    return n_processed
