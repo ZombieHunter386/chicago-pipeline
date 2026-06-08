@@ -18,8 +18,19 @@ The existing `config/scoring.yaml` stays as the value-add multifamily profile �
 The system has three concerns that previously didn't exist:
 
 1. **Multi-profile scoring** — one engine run produces multiple `score_*` columns from multiple profile YAMLs.
-2. **Hard filters** — some signals are "in or out" (must be ADU-eligible, must not be a condo), not "more or less." The scoring engine needs to express filters distinct from weighted signals.
+2. **Profile-level filter presets** — picking a profile in the UI auto-applies a set of recommended filters (e.g., picking "ADU" applies `adu_eligible=1`, `lot_size_sf BETWEEN 3500-12000`, `is_condo_unit=0`). Filters live in the existing UI/`filter_schema` layer, NOT in the scoring YAML — operators can toggle them off without re-running the engine.
 3. **New per-parcel attributes** — lot width (derived from polygons we already fetch) and ADU eligibility (derived from a new ArcGIS data source).
+
+**Separation of concerns:**
+
+| Layer | Purpose | Source of truth |
+|---|---|---|
+| Scoring YAML | "Given a parcel, how well does it match this strategy?" — pure signals + weights | `config/scoring_<profile>.yaml` |
+| Profile filter defaults | "When the operator picks this profile, which filters auto-apply?" | `config/profile_defaults.yaml` |
+| UI filters | Live filter state — fully operator-controlled, URL-shareable | Existing `filter_schema.py` + `/api/filters` |
+| Profile dropdown | Picks the `score_*` column that ranks the filtered set + triggers default-filter auto-apply | New UI component |
+
+Every parcel gets every profile score. The scoring engine doesn't know about filters at all. Operators narrow the pool via UI filters; the profile dropdown ranks within the pool. A non-ADU-eligible parcel still has a `score_adu` value (typically low, because `adu_eligible` is a heavily-weighted negative for non-eligible parcels) — it just won't appear in the default ADU view because the auto-applied `adu_eligible=1` filter excludes it. The operator can toggle that filter off to see how it would have ranked.
 
 ### 1. New `parcels` columns (additive schema migration)
 
@@ -105,36 +116,52 @@ Refresh cadence: monthly (the City publishes updates infrequently). Document in 
 
 **Owner-occupancy assumption.** Hunter is acquiring with intent to live in either the main house or the ADU. This satisfies the "Owner Occupancy Limits" restriction text on roughly half the polygons. If a future operator plans pure-investment acquisition, the `adu_eligible` derivation needs a flag to exclude RS-with-owner-occ-restriction zones — flagged as an open question below.
 
-### 4. Scoring engine extension: filters block
+### 4. Scoring engine extension: multi-profile output only
 
-The current YAML schema only supports weighted signals (`positive` / `negative` direction, linear normalization). To express "ADU candidates must be non-condo, 3,500–12,000 sf, and ADU-eligible," we extend the schema:
+The current YAML schema already supports everything the new profiles need at the signal level (continuous / binary, positive / negative, linear normalization). The only change is that the engine now reads multiple profile YAMLs in one pass and writes one `score_<profile>` column per YAML.
 
+**Engine signature change:** `score_parcels(db_path, scoring_config)` becomes `score_parcels(db_path, scoring_configs: list[(profile_name, scoring_config)])`. The current `score` column is preserved (the value-add profile writes to it). New profiles write to `score_adu` and `score_redev`.
+
+No filter parsing. No SQL WHERE clause appended. Every parcel gets every profile's score. Parcels that don't fit a strategy score low on its profile — that's the signal, not exclusion.
+
+The YAML schema stays minimal:
 ```yaml
-filters:
-  zone_class_prefix_in: ["RS-", "RT-", "RM-", "B", "C"]   # OR of prefixes
-  is_condo_unit: 0                                          # equality
-  lot_size_sf_between: [3500, 12000]                        # inclusive range
-  lot_width_ft_not_null: true                               # presence check
-  adu_eligible: 1                                           # equality
-
+version: string
+top_n: integer
 signals:
-  # ... unchanged signal shape ...
+  <signal_name>:
+    weight: float
+    kind: "continuous" | "binary"
+    direction: "positive" | "negative"
+    normalization: {min: float, max: float}   # required for continuous
 ```
 
-Six supported operator suffixes (everything the two profiles need; resist adding more until a new profile requires it):
+### 4b. Profile filter defaults
 
-| Suffix | Meaning | SQL it compiles to |
-|---|---|---|
-| `_in` | column value in list | `col IN (...)` |
-| `_prefix_in` | column starts with any of the listed prefixes | `(col LIKE 'a%' OR col LIKE 'b%' ...)` |
-| `_between` | column value within `[min, max]` inclusive | `col BETWEEN ? AND ?` |
-| `_min` / `_max` | one-sided range | `col >= ?` / `col <= ?` |
-| `_not_null` | column IS NOT NULL | `col IS NOT NULL` |
-| (no suffix) | equality (handles 0/1 booleans, strings, ints) | `col = ?` |
+A separate config file maps profile names to recommended UI filters:
 
-Parser lives in `pipeline/score.py`. Filters compile to a SQL `WHERE` clause that's appended to the parcel query — parcels excluded by filters get `score_<profile> = NULL` (NOT 0 — NULL means "not in this profile's pool" and the UI excludes them).
+```yaml
+# config/profile_defaults.yaml
+value_add:
+  recommended_filters: {}            # default: no auto-applied filters
 
-**Engine signature change:** `score_parcels(db_path, scoring_config)` becomes `score_parcels(db_path, scoring_configs: list[(profile_name, scoring_config)])`. Each profile's run writes to its own `score_<profile_name>` column. The current `score` column is preserved (the value-add profile writes to it).
+adu:
+  recommended_filters:
+    adu_eligible: 1
+    is_condo_unit: 0
+    lot_size_sf: {between: [3500, 12000]}
+    lot_width_ft: {not_null: true}
+
+redev:
+  recommended_filters:
+    is_condo_unit: 0
+    lot_size_sf: {min: 5000}
+    zone_class: {prefix_in: ["RT-", "RM-", "B", "C"]}
+```
+
+The webapp loads this at startup and exposes the per-profile defaults via the parcels list route. When the operator picks a profile in the dropdown, the frontend merges these defaults into the URL filter state. Operators can toggle any of them off afterward — the URL is the source of truth, defaults are just the initial values.
+
+**Filter operator shape** matches existing `/api/filters` semantics: equality is implicit, range / list operators are nested objects. `filter_schema.py` is extended to register `adu_eligible`, `adu_has_annual_limits`, `adu_restriction_text`, and `lot_width_ft` as filterable columns — purely additive.
 
 ### 5. Profile YAMLs
 
@@ -143,16 +170,9 @@ Parser lives in `pipeline/score.py`. Filters compile to a SQL `WHERE` clause tha
 ```yaml
 version: 1.0.0-2026-06-08
 top_n: 20
-
-filters:
-  is_condo_unit: 0
-  lot_size_sf_between: [3500, 12000]
-  lot_width_ft_not_null: true
-  adu_eligible: 1
-
 signals:
   lot_width_ft:
-    weight: 0.35
+    weight: 0.30
     kind: continuous
     direction: positive
     normalization: {min: 25, max: 50}        # 25 ft = standard Chicago lot, 50 ft = wide
@@ -161,17 +181,21 @@ signals:
     kind: continuous
     direction: positive
     normalization: {min: 3500, max: 12000}
+  adu_eligible:                                # heavy positive — non-eligible parcels sink
+    weight: 0.20
+    kind: binary
+    direction: positive
   adu_has_annual_limits:                       # derived binary from adu_restriction_text
-    weight: 0.10
+    weight: 0.05
     kind: binary
     direction: negative                        # annual cap = slower permitting
   last_sale_price_recent:                      # populated only when hold_duration_years ≤ 3
-    weight: 0.15
+    weight: 0.10
     kind: continuous
     direction: negative
     normalization: {min: 200000, max: 1500000}
   hold_duration_years:
-    weight: 0.15
+    weight: 0.10
     kind: continuous
     direction: positive                        # long-held = motivated seller proxy
     normalization: {min: 5, max: 30}
@@ -182,19 +206,15 @@ signals:
     normalization: {min: 3, max: 25}
 ```
 
-**Pool sizing estimate:** ~3,000–5,000 ADU-eligible parcels after filters. Tighter than the value-add pool because of the lot size band + ADU eligibility constraints.
+Weights sum to 1.00. Auto-applied filters (in `profile_defaults.yaml`): `adu_eligible=1`, `is_condo_unit=0`, `lot_size_sf BETWEEN 3500-12000`, `lot_width_ft NOT NULL`.
+
+**Pool sizing estimate:** ~3,000–5,000 parcels in the default ADU view (after auto-applied filters). Operators can toggle filters off to explore wider — every parcel still has a `score_adu` value for comparison.
 
 #### `config/scoring_redev.yaml`
 
 ```yaml
 version: 1.0.0-2026-06-08
 top_n: 20
-
-filters:
-  is_condo_unit: 0
-  lot_size_sf_min: 5000                        # too small to bother redeveloping
-  zone_class_prefix_in: ["RT-", "RM-", "B", "C"]   # multifamily-allowing or commercial
-
 signals:
   far_gap_delta:
     weight: 0.30                               # headline 'underzoned' signal
@@ -231,7 +251,9 @@ signals:
     normalization: {min: 5, max: 30}
 ```
 
-**Pool sizing estimate:** ~10,000–15,000 redev candidates. Larger than ADU because no FAR delta hard floor and no upper lot size cap.
+Weights sum to 1.00. Auto-applied filters (in `profile_defaults.yaml`): `is_condo_unit=0`, `lot_size_sf >= 5000`, `zone_class` starts with `RT-` / `RM-` / `B` / `C`.
+
+**Pool sizing estimate:** ~10,000–15,000 parcels in the default redev view. Operators can toggle filters off to explore wider — every parcel still has a `score_redev` value for comparison.
 
 #### Two derived columns this design depends on
 
@@ -252,9 +274,14 @@ The current top bar shows score version + "Top N shown" metadata. Add a profile 
 </select>
 ```
 
-Selecting a profile re-issues the parcels list query with `?profile=adu`; the route's existing `_build_where` adds `WHERE score_adu IS NOT NULL ORDER BY score_adu DESC LIMIT 20`. Filters/map/search continue working — they're orthogonal to which score column ranks the list.
+**Two effects when the operator picks a profile:**
 
-Profile selection persists in `localStorage` so reload keeps the operator's choice.
+1. **Sort column change.** The parcels list query swaps `ORDER BY score DESC` for `ORDER BY score_<profile> DESC`. Existing filter / map / search state is untouched.
+2. **Auto-apply recommended filters.** The frontend reads the profile's `recommended_filters` from `/api/profile-defaults`, merges them into the current URL filter state, and updates the URL. Operators can toggle any of them off afterward — the URL filter state is the source of truth.
+
+Profile selection persists in `localStorage` so reload keeps the operator's choice. Filter state continues to live in the URL (already the existing pattern) so a profile-with-filters view is shareable.
+
+**Auto-apply semantics:** non-destructive. If the operator already has `lot_size_sf BETWEEN 4000-10000` set and picks "ADU" (whose default is `3500-12000`), the existing 4000-10000 wins — defaults only fill in unset filters. Avoids stomping operator intent.
 
 ---
 
@@ -262,11 +289,15 @@ Profile selection persists in `localStorage` so reload keeps the operator's choi
 
 Per-phase TDD. Each phase blocks on green tests before merge.
 
-### Filter block parsing + application
-- YAML with each operator type loads without error; an unknown operator suffix raises with a clear message naming the column.
-- Filter SQL compilation: `lot_size_sf_between: [3500, 12000]` → `lot_size_sf BETWEEN 3500 AND 12000`; combinable; null handling explicit.
-- A parcel that matches all filters gets a non-NULL `score_<profile>`; a parcel that fails any filter gets NULL.
-- Two profiles run in one engine pass produce two distinct `score_*` columns with independent pools.
+### Multi-profile scoring engine
+- A list of `(profile_name, scoring_config)` tuples runs in one pass; each writes to its own `score_<profile_name>` column. The legacy `score` column is preserved (value-add profile writes to it).
+- Each profile run produces a non-NULL score for every parcel — no filter exclusion. A parcel that scores poorly on one profile still has a comparable value for ranking against others.
+- Smoke test: ADU and redev profiles produce distinct distributions on the same parcel set (sanity: top-20 lists shouldn't be identical).
+
+### Profile defaults loader
+- `config/profile_defaults.yaml` loads cleanly; an unknown filter operator nested under a profile raises at load with a clear message naming the profile + column.
+- `/api/profile-defaults` returns the per-profile recommended_filters dict.
+- `filter_schema.py` registers the new filterable columns (`adu_eligible`, `adu_has_annual_limits`, `adu_restriction_text`, `lot_width_ft`); each works through the existing `/api/parcels` filter flow.
 
 ### Lot width backfill
 - `minimum_rotated_rectangle` on a 25 ft × 125 ft fixture polygon returns `(25.0 ± 0.5, 125.0 ± 0.5)`.
@@ -280,12 +311,14 @@ Per-phase TDD. Each phase blocks on green tests before merge.
 - Returns 0 for `("M1-2", True/False)`, `("PD 853", True/False)`, `("C3-2", True/False)`, `(None, True/False)`.
 
 ### Profile YAMLs
-- Both new YAMLs load without raising; the engine produces non-empty `score_adu` and `score_redev` distributions on the smoke DB.
-- A parcel that fails the ADU `is_condo_unit: 0` filter has `score_adu IS NULL` and a non-NULL `score` (value-add doesn't filter on this).
+- Both new YAMLs load without raising; the engine produces non-empty `score_adu` and `score_redev` distributions across all parcels.
+- Weights sum to 1.00 for each profile (loader asserts this).
+- A condo parcel has a meaningful `score_adu` (likely low because `adu_eligible=0`), proving filters are not blocking score computation.
 
 ### UI dropdown
-- Selecting a profile re-issues the API call with `?profile=`; the rendered list updates to the new ranking.
-- The selection persists in localStorage across reloads.
+- Selecting a profile re-issues the API call with `?profile=`; the rendered list re-sorts by the new score column.
+- Selecting a profile also auto-merges recommended_filters into the URL filter state; user-set filters are preserved (defaults only fill unset slots).
+- The selection persists in localStorage across reloads; the URL filter state stays the source of truth for filters.
 - Filters / search / map state survive the profile switch (no full page reload).
 
 ---
@@ -299,8 +332,8 @@ Six PRs, each independently mergeable. Each phase's PR description references th
 | 1 | Schema migration: add 8 new columns to `parcels`; init_db idempotent | New columns persist after `pipeline init` | All existing tests green |
 | 2 | Lot width backfill: extend `sources/ccgis_parcels.py` + one-time backfill run | Polygon math + DB write | Hunter spot-checks `lot_width_ft` for 5 known parcels |
 | 3 | ADU enrichment loader: new `sources/chicago_adu_zones.py` + spatial join + `adu_eligible` / `adu_restriction_text` derivation | Spatial join + derivation logic | Hunter spot-checks `adu_eligible` for an RS parcel inside vs outside a polygon |
-| 4 | Scoring engine extension: filters block, multi-profile output, two new YAML files | Filter parsing, multi-profile run | **Hunter explicitly approves the proposed signal weights before merging.** Until merged, `score_adu` / `score_redev` columns stay NULL. |
-| 5 | UI profile dropdown + route changes | Frontend selection behavior | Hunter reviews UX |
+| 4 | Scoring engine extension: multi-profile output. Two new YAML files. `profile_defaults.yaml`. `filter_schema.py` registers new filterable columns. | Multi-profile run; profile defaults loader; new filter columns work via `/api/parcels` | **Hunter explicitly approves the proposed signal weights before merging.** Until merged, `score_adu` / `score_redev` columns stay NULL. |
+| 5 | UI profile dropdown + auto-apply recommended filters + route serves `/api/profile-defaults` | Frontend selection behavior + filter auto-merge | Hunter reviews UX |
 | 6 | End-to-end data refresh: rerun fetch_all → analyze → score across all 3 profiles; present top-20 per profile for sanity check | Smoke run produces expected pool sizes (~3-5k ADU, ~10-15k redev) | Hunter confirms top-20 lists look right before any outreach is initiated against them |
 
 ---
