@@ -1,0 +1,48 @@
+# Redevelopment profile — Hunter-approved weights, 2026-06-08.
+#
+# Headline signal is far_gap_delta — parcels with significant unused
+# FAR runway (zoning allows much more than what's currently built).
+# Heavy CTA proximity weighting reflects that redev income is largely
+# driven by transit access. is_low_util_land was removed during weight
+# negotiation — focuses the profile on built parcels with zoning
+# arbitrage rather than vacant land plays.
+#
+# Auto-applied UI filters (in config/profile_defaults.yaml):
+#   is_condo_unit=0, lot_size_sf >= 5000, zone_class prefix in
+#   RT-/RM-/B/C.
+#
+# Weights sum to 1.00.
+
+version: 1.0.0-2026-06-08
+top_n: 20
+signals:
+  far_gap_delta:
+    weight: 0.50
+    kind: continuous
+    direction: positive
+    insignificant: false
+    normalization: {min: 0, max: 6.3}      # data max in data/full.alt.db on 2026-06-08; p99=2.36
+  cta_distance_ft:
+    weight: 0.20
+    kind: continuous
+    direction: negative
+    insignificant: false
+    normalization: {min: 0, max: 4000}
+  lot_size_sf:
+    weight: 0.10
+    kind: continuous
+    direction: positive
+    insignificant: false
+    normalization: {min: 1000, max: 50000}
+  allows_multifamily_by_right:
+    weight: 0.10
+    kind: binary
+    direction: positive
+    insignificant: false
+    normalization: {min: 0, max: 1}
+  hold_duration_years:
+    weight: 0.10
+    kind: continuous
+    direction: positive
+    insignificant: false
+    normalization: {min: 1, max: 30}

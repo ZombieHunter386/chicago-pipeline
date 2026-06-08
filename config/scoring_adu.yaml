@@ -1,0 +1,60 @@
+# ADU acquisition profile — Hunter-approved weights, 2026-06-08.
+#
+# Prioritizes wide residential lots that physically support an ADU
+# (coach house or basement conversion), ADU-eligibility per City rules,
+# transit proximity (rental premium for both units), and motivated-
+# seller proxies (long hold, deferred permits). Affordability is a soft
+# signal — only fires when last_sale_price_recent has a value (parcel
+# sold within the last 3 years).
+#
+# Auto-applied UI filters (in config/profile_defaults.yaml):
+#   adu_eligible=1, is_condo_unit=0, lot_size_sf BETWEEN 3500-12000,
+#   lot_width_ft NOT NULL.
+#
+# Weights sum to 1.00.
+
+version: 1.0.0-2026-06-08
+top_n: 20
+signals:
+  lot_width_ft:
+    weight: 0.30
+    kind: continuous
+    direction: positive
+    insignificant: false
+    normalization: {min: 20, max: 100}
+  lot_size_sf:
+    weight: 0.15
+    kind: continuous
+    direction: positive
+    insignificant: false
+    normalization: {min: 1500, max: 10000}
+  adu_eligible:
+    weight: 0.25
+    kind: binary
+    direction: positive
+    insignificant: false
+    normalization: {min: 0, max: 1}
+  cta_distance_ft:
+    weight: 0.10
+    kind: continuous
+    direction: negative
+    insignificant: false
+    normalization: {min: 0, max: 4000}
+  last_sale_price_recent:
+    weight: 0.05
+    kind: continuous
+    direction: negative
+    insignificant: false
+    normalization: {min: 200000, max: 1500000}
+  hold_duration_years:
+    weight: 0.10
+    kind: continuous
+    direction: positive
+    insignificant: false
+    normalization: {min: 5, max: 30}
+  years_since_last_permit:
+    weight: 0.05
+    kind: continuous
+    direction: positive
+    insignificant: false
+    normalization: {min: 3, max: 25}
