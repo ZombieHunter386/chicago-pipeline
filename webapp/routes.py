@@ -970,61 +970,97 @@ def register(app: Flask) -> None:
                 except ValueError as e:
                     abort(400, str(e))
 
-                contact_ids = [
-                    outreach_module.upsert_contact(conn, pin=pin, email=addr, source="manual")
-                    for addr in to_list
-                ]
-                cid = contact_ids[0]
-
-                try:
-                    result = gmail_client.send_email(
-                        token_path=Path(app.config["GMAIL_TOKEN_PATH"]),
-                        sender=sender,
-                        to=sender,                  # visible To: header is the sender per BCC convention
-                        bcc=to_list,                # actual delivery
-                        subject=subject, body=body,
+                # Per-recipient fan-out: each address in to_list gets a
+                # separately-addressed Gmail send (To: = recipient, no BCC)
+                # AND its own outreach row tied to that recipient's
+                # contact_id. Best-effort: a per-recipient HttpError doesn't
+                # abort the batch — successful recipients still get rows.
+                # Global auth errors (RefreshError / GmailNotConnectedError)
+                # DO abort, since every subsequent attempt would fail the
+                # same way and spamming N identical errors is just noise.
+                results: list[dict] = []
+                for addr in to_list:
+                    cid = outreach_module.upsert_contact(
+                        conn, pin=pin, email=addr, source="manual",
                     )
-                except gmail_client.GmailNotConnectedError as e:
-                    abort(503, f"Gmail not connected: {e}")
-                except RefreshError as e:
-                    # load_credentials already translates RefreshError to
-                    # GmailNotConnectedError. This branch is defense-in-depth
-                    # for any future path where RefreshError escapes — e.g.
-                    # the Google client retrying inside send_email itself.
-                    abort(503, f"Gmail not connected: refresh token rejected ({e}). "
-                          "Re-consent at /api/oauth/start.")
-                except HttpError as e:
-                    # Quota (429), forbidden sender (403), or upstream 5xx.
-                    # Surface a 503 with the actual reason so the UI can show it.
-                    abort(503, f"Gmail API error: {e}")
+                    try:
+                        sent = gmail_client.send_email(
+                            token_path=Path(app.config["GMAIL_TOKEN_PATH"]),
+                            sender=sender,
+                            to=addr,                 # direct addressed send
+                            subject=subject, body=body,
+                        )
+                    except gmail_client.GmailNotConnectedError as e:
+                        abort(503, f"Gmail not connected: {e}")
+                    except RefreshError as e:
+                        # load_credentials already translates RefreshError to
+                        # GmailNotConnectedError. Defense-in-depth for any
+                        # future path where RefreshError escapes.
+                        abort(503, f"Gmail not connected: refresh token rejected ({e}). "
+                              "Re-consent at /api/oauth/start.")
+                    except HttpError as e:
+                        # Per-recipient transient (quota, forbidden, 5xx) —
+                        # record + continue. Surfaced in the response so the
+                        # operator sees which addresses didn't go through.
+                        results.append({
+                            "to": addr,
+                            "status": "failed",
+                            "error": f"Gmail API error: {e}",
+                        })
+                        continue
 
-                try:
-                    oid = outreach_module.create_outreach_record(
-                        conn, pin=pin, contact_id=cid,
-                        channel="email", subject=subject, body=body,
-                        sent_date=_now_iso(),
-                        touch_number=touch_number,
+                    try:
+                        oid = outreach_module.create_outreach_record(
+                            conn, pin=pin, contact_id=cid,
+                            channel="email", subject=subject, body=body,
+                            sent_date=_now_iso(),
+                            touch_number=touch_number,
+                        )
+                    except sqlite3.IntegrityError:
+                        # Same (pin, touch_number, contact_id) already exists
+                        # — operator clicked send twice for the same person.
+                        # Email already went out though, so this is a soft
+                        # failure: report it, keep going.
+                        results.append({
+                            "to": addr,
+                            "status": "failed",
+                            "error": "touch already sent to this contact",
+                        })
+                        continue
+                    conn.execute(
+                        "UPDATE outreach SET gmail_message_id = ? WHERE outreach_id = ?",
+                        (sent.get("id", ""), oid),
                     )
-                except sqlite3.IntegrityError:
-                    abort(409, "touch already completed (race detected)")
-                # Persist the Gmail message id in its dedicated column.
-                conn.execute(
-                    "UPDATE outreach SET gmail_message_id = ? WHERE outreach_id = ?",
-                    (result.get("id", ""), oid),
-                )
-                # Auto-transition: scored → outreach on first successful send.
-                conn.execute(
-                    "UPDATE parcels SET stage = 'outreach' "
-                    "WHERE pin = ? AND (stage IS NULL OR stage = 'scored')",
-                    (pin,),
-                )
+                    results.append({
+                        "to": addr,
+                        "status": "sent",
+                        "outreach_id": oid,
+                        "gmail_message_id": sent.get("id", ""),
+                        "gmail_thread_id": sent.get("threadId", ""),
+                    })
+
+                # Auto-transition scored → outreach if any send succeeded.
+                if any(r["status"] == "sent" for r in results):
+                    conn.execute(
+                        "UPDATE parcels SET stage = 'outreach' "
+                        "WHERE pin = ? AND (stage IS NULL OR stage = 'scored')",
+                        (pin,),
+                    )
                 conn.commit()
 
+            sent_count = sum(1 for r in results if r["status"] == "sent")
+            failed_count = len(results) - sent_count
+            # HTTP status: 200 all-sent, 207 partial, 503 all-failed.
+            status_code = (
+                200 if failed_count == 0
+                else 503 if sent_count == 0
+                else 207
+            )
             return jsonify({
-                "outreach_id": oid,
-                "gmail_message_id": result.get("id", ""),
-                "gmail_thread_id": result.get("threadId", ""),
-            })
+                "results": results,
+                "sent": sent_count,
+                "failed": failed_count,
+            }), status_code
 
         @app.post("/api/outreach/<int:outreach_id>/mark-replied")
         def api_outreach_mark_replied(outreach_id: int):

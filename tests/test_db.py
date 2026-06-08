@@ -244,35 +244,54 @@ def test_init_db_creates_outreach_gmail_message_id_column(tmp_path):
     conn.close()
 
 
-def test_init_db_creates_outreach_unique_touch_index(tmp_path):
-    """init_db should create a partial unique index on outreach(pin, touch_number)
-    so two rows with the same (pin, touch_number) can't coexist."""
+def test_init_db_creates_outreach_unique_touch_contact_index(tmp_path):
+    """init_db creates a partial unique index on
+    outreach(pin, touch_number, contact_id) — per-recipient sends mean
+    multiple rows per touch are valid (one per addressed contact); only
+    the same (pin, touch, contact) tuple must be unique to prevent
+    double-sending the same touch to the same recipient."""
     from pipeline.db import init_db
     import sqlite3
     p = tmp_path / "t.db"
     init_db(p)
     conn = sqlite3.connect(p)
-    # Insert a parcel + first outreach row
     conn.execute("INSERT INTO parcels (pin) VALUES (?)", ("14210010010000",))
     conn.execute(
-        "INSERT INTO outreach (pin, touch_number, sent_date) VALUES (?, ?, ?)",
-        ("14210010010000", 1, "2026-05-15T09:00:00Z"),
+        "INSERT INTO contacts (pin, email, source) VALUES (?, ?, ?)",
+        ("14210010010000", "a@x.com", "manual"),
+    )
+    cid_a = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.execute(
+        "INSERT INTO contacts (pin, email, source) VALUES (?, ?, ?)",
+        ("14210010010000", "b@x.com", "manual"),
+    )
+    cid_b = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    # First send to contact A on touch 1
+    conn.execute(
+        "INSERT INTO outreach (pin, contact_id, touch_number, sent_date) VALUES (?, ?, ?, ?)",
+        ("14210010010000", cid_a, 1, "2026-05-15T09:00:00Z"),
     )
     conn.commit()
-    # Attempting a duplicate (same pin, same touch) must fail
+    # Same (pin, touch, contact_id) MUST fail
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute(
-            "INSERT INTO outreach (pin, touch_number, sent_date) VALUES (?, ?, ?)",
-            ("14210010010000", 1, "2026-05-15T10:00:00Z"),
+            "INSERT INTO outreach (pin, contact_id, touch_number, sent_date) VALUES (?, ?, ?, ?)",
+            ("14210010010000", cid_a, 1, "2026-05-15T10:00:00Z"),
         )
         conn.commit()
-    # But a different touch_number is fine
+    # Same touch, DIFFERENT contact is fine (per-recipient send)
     conn.execute(
-        "INSERT INTO outreach (pin, touch_number, sent_date) VALUES (?, ?, ?)",
-        ("14210010010000", 2, "2026-05-18T09:00:00Z"),
+        "INSERT INTO outreach (pin, contact_id, touch_number, sent_date) VALUES (?, ?, ?, ?)",
+        ("14210010010000", cid_b, 1, "2026-05-15T09:00:00Z"),
     )
     conn.commit()
-    # And NULL touch_number rows can repeat (partial index)
+    # Different touch, same contact also fine
+    conn.execute(
+        "INSERT INTO outreach (pin, contact_id, touch_number, sent_date) VALUES (?, ?, ?, ?)",
+        ("14210010010000", cid_a, 2, "2026-05-18T09:00:00Z"),
+    )
+    conn.commit()
+    # NULL touch_number rows can repeat (partial index)
     conn.execute("INSERT INTO outreach (pin) VALUES (?)", ("14210010010000",))
     conn.execute("INSERT INTO outreach (pin) VALUES (?)", ("14210010010000",))
     conn.commit()

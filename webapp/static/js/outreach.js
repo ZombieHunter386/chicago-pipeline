@@ -713,7 +713,17 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    if (!resp.ok) {
+    // 200 all-sent, 207 partial, 503 all-failed; all three return the
+    // per-recipient results payload. Only non-2xx-and-non-207 is a hard fail.
+    if (resp.status >= 400 && resp.status !== 207) {
+      // Try to parse a structured response (e.g. all-failed 503 with per-recipient results)
+      let body;
+      try { body = await resp.json(); } catch (_) { body = null; }
+      if (body && body.results) {
+        const err = new Error(`Send failed (${body.failed}/${body.results.length})`);
+        err.results = body.results;
+        throw err;
+      }
       const text = await resp.text();
       throw new Error(text || `HTTP ${resp.status}`);
     }
@@ -769,7 +779,7 @@
             <input type="text" id="cm-from" value="${escapeHtml(senderAddress || '')}" disabled />
           </div>
           <div class="cm-row">
-            <label class="cm-label">To (BCC, all checked by default)</label>
+            <label class="cm-label">Recipients (one email per address, all checked by default)</label>
             <div class="bcc-checkbox-list">
               ${aliveEmails.map(c => `
                 <label class="bcc-checkbox">
@@ -875,16 +885,38 @@
       if (!subject) { errSpan.textContent = 'subject required'; return; }
       sendBtn.disabled = true; sendBtn.textContent = 'Sending…';
       try {
-        await sendOutreach({
+        const result = await sendOutreach({
           pin: parcel.pin, to_list: toList, subject, body,
           touch_number: touchNumber,
         });
         onClose();
-        showToast('Email sent', 'success');
+        // Per-recipient send: result.sent / result.failed / result.results[].
+        // Toast wording matches what actually happened.
+        if (result.failed === 0) {
+          showToast(
+            `Email sent to ${result.sent} recipient${result.sent === 1 ? '' : 's'}`,
+            'success',
+          );
+        } else {
+          const failedTos = result.results
+            .filter(r => r.status === 'failed')
+            .map(r => r.to)
+            .join(', ');
+          showToast(
+            `Sent ${result.sent} of ${result.results.length}. Failed: ${failedTos}`,
+            'error',
+          );
+        }
         window.dispatchEvent(new CustomEvent('outreach:refresh',
                                               { detail: { pin: parcel.pin } }));
       } catch (e) {
-        errSpan.textContent = e.message || 'send failed';
+        // Hard error (all-failed 503 with structured results, or any other error)
+        if (e.results) {
+          const failedTos = e.results.filter(r => r.status === 'failed').map(r => r.to).join(', ');
+          errSpan.textContent = `All sends failed: ${failedTos}`;
+        } else {
+          errSpan.textContent = e.message || 'send failed';
+        }
         sendBtn.disabled = false; sendBtn.textContent = 'Send';
       }
     });

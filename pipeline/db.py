@@ -557,11 +557,16 @@ def init_db(db_path: Path) -> None:
                     if "duplicate column" not in str(e).lower():
                         raise
         # Partial unique index on outreach(pin, touch_number). Partial WHERE
-        # touch_number IS NOT NULL so legacy rows pre-cadence don't conflict.
-        # Prevents race-duplicates from concurrent send/log endpoints.
+        # Per-recipient sends: each address in to_list gets its own outreach
+        # row, so uniqueness now keys on (pin, touch_number, contact_id) —
+        # multiple rows per touch (one per recipient) are valid; only
+        # double-sending the same touch to the same contact is forbidden.
+        # The old (pin, touch_number) index is dropped if present.
+        conn.execute("DROP INDEX IF EXISTS idx_outreach_pin_touch_unique")
         conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_outreach_pin_touch_unique "
-            "ON outreach(pin, touch_number) WHERE touch_number IS NOT NULL"
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_outreach_pin_touch_contact_unique "
+            "ON outreach(pin, touch_number, contact_id) "
+            "WHERE touch_number IS NOT NULL AND contact_id IS NOT NULL"
         )
         # ---- Skip-trace enrichment tables (Plan 2026-05-23) ----
         # Order matters: enrichment_results FKs enrichment_jobs(id), so the

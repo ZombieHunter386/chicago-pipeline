@@ -200,25 +200,174 @@ def test_outreach_send_503_when_refresh_token_revoked(app, monkeypatch):
     assert "Gmail" in body or "oauth" in body.lower()
 
 
-def test_send_with_to_list_uses_bcc(app, monkeypatch):
-    """POST /api/outreach/send accepts to_list and the request body sends
-    via BCC (preserving the visible To: header as the sender)."""
+def test_send_sends_one_email_per_recipient_with_recipient_in_to(app, monkeypatch):
+    """to_list with N addresses must fire N separate Gmail sends, each
+    addressed directly to that recipient (no BCC fan-out). Operator's
+    request: 'I want a separate email for each address, directly to that
+    address' — not the old BCC-blast model."""
     client = app.test_client()
     client.post("/api/enrichment/lookup/14000000000001")
-    captured = {}
+    # Seed a second alive contact so to_list of 2 works
+    with app.app_context():
+        from webapp.routes import _conn
+        with _conn() as conn:
+            conn.execute(
+                "INSERT INTO contacts(pin, email, source) "
+                "VALUES ('14000000000001', 'jane@x.com', 'manual')"
+            )
+            conn.commit()
+    sends = []
     from pipeline import gmail_client
     def fake_send(**kw):
-        captured.update(kw)
-        return {"id": "x", "threadId": "y"}
+        sends.append(kw)
+        return {"id": f"msg-{len(sends)}", "threadId": f"thr-{len(sends)}"}
     monkeypatch.setattr(gmail_client, "send_email", fake_send)
     app.config["GMAIL_SENDER_ADDRESS"] = "me@example.com"
 
     r = client.post("/api/outreach/send", json={
         "pin": "14000000000001",
-        "to_list": ["john@x.com"],
+        "to_list": ["john@x.com", "jane@x.com"],
         "subject": "hi", "body": "hello",
         "touch_number": 1,
     })
-    assert r.status_code == 200
-    assert captured["bcc"] == ["john@x.com"]
-    assert captured["to"] == "me@example.com"
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert len(sends) == 2, "must send 2 separate emails for 2 recipients"
+    # Each send carries the recipient in To: with no BCC.
+    addresses = sorted(s["to"] for s in sends)
+    assert addresses == ["jane@x.com", "john@x.com"]
+    for s in sends:
+        assert s.get("bcc") in (None, [])
+        assert s["to"] != "me@example.com"
+
+    # Response carries per-recipient results.
+    data = r.get_json()
+    assert data["sent"] == 2
+    assert data["failed"] == 0
+    assert len(data["results"]) == 2
+    for row in data["results"]:
+        assert row["status"] == "sent"
+        assert row["gmail_message_id"]
+        assert row["outreach_id"]
+
+
+def test_send_writes_one_outreach_row_per_recipient(app, monkeypatch):
+    """Each addressed send produces its own outreach row, tied to that
+    recipient's contact_id, so per-recipient reply tracking + Gmail
+    message-id audit works downstream."""
+    client = app.test_client()
+    client.post("/api/enrichment/lookup/14000000000001")
+    with app.app_context():
+        from webapp.routes import _conn
+        with _conn() as conn:
+            conn.execute(
+                "INSERT INTO contacts(pin, email, source) "
+                "VALUES ('14000000000001', 'jane@x.com', 'manual')"
+            )
+            conn.commit()
+    from pipeline import gmail_client
+    def fake_send(**kw):
+        return {"id": f"msg-{kw['to']}", "threadId": "t"}
+    monkeypatch.setattr(gmail_client, "send_email", fake_send)
+    app.config["GMAIL_SENDER_ADDRESS"] = "me@example.com"
+
+    client.post("/api/outreach/send", json={
+        "pin": "14000000000001",
+        "to_list": ["john@x.com", "jane@x.com"],
+        "subject": "hi", "body": "hello",
+        "touch_number": 1,
+    })
+
+    with app.app_context():
+        from webapp.routes import _conn
+        with _conn() as conn:
+            rows = conn.execute(
+                "SELECT outreach_id, contact_id, gmail_message_id, touch_number, channel "
+                "FROM outreach WHERE pin='14000000000001' ORDER BY outreach_id"
+            ).fetchall()
+    # 2 rows, both touch 1, distinct contact_ids, distinct gmail_message_ids
+    assert len(rows) == 2
+    assert all(r[3] == 1 for r in rows)
+    assert all(r[4] == "email" for r in rows)
+    assert len({r[1] for r in rows}) == 2  # distinct contact_ids
+    assert {r[2] for r in rows} == {"msg-john@x.com", "msg-jane@x.com"}
+
+
+def test_send_partial_failure_returns_207_with_per_recipient_status(app, monkeypatch):
+    """If recipient 2 of 3 fails (transient quota error), recipients 1+3
+    must still get their emails + rows. Response is 207 Multi-Status with
+    per-recipient results."""
+    client = app.test_client()
+    client.post("/api/enrichment/lookup/14000000000001")
+    with app.app_context():
+        from webapp.routes import _conn
+        with _conn() as conn:
+            conn.execute("INSERT INTO contacts(pin, email, source) "
+                         "VALUES ('14000000000001', 'jane@x.com', 'manual')")
+            conn.execute("INSERT INTO contacts(pin, email, source) "
+                         "VALUES ('14000000000001', 'bob@x.com', 'manual')")
+            conn.commit()
+    from googleapiclient.errors import HttpError
+    from unittest.mock import MagicMock
+    from pipeline import gmail_client
+    call_count = {"n": 0}
+    def flaky_send(**kw):
+        call_count["n"] += 1
+        if kw["to"] == "jane@x.com":
+            # Forge a minimal HttpError without hitting Google
+            fake_resp = MagicMock()
+            fake_resp.status = 429
+            fake_resp.reason = "Too Many Requests"
+            raise HttpError(fake_resp, b'{"error":{"message":"quota"}}')
+        return {"id": f"msg-{call_count['n']}", "threadId": "t"}
+    monkeypatch.setattr(gmail_client, "send_email", flaky_send)
+    app.config["GMAIL_SENDER_ADDRESS"] = "me@example.com"
+
+    r = client.post("/api/outreach/send", json={
+        "pin": "14000000000001",
+        "to_list": ["john@x.com", "jane@x.com", "bob@x.com"],
+        "subject": "hi", "body": "hello",
+        "touch_number": 1,
+    })
+    assert r.status_code == 207
+    data = r.get_json()
+    assert data["sent"] == 2
+    assert data["failed"] == 1
+    by_to = {row["to"]: row for row in data["results"]}
+    assert by_to["john@x.com"]["status"] == "sent"
+    assert by_to["bob@x.com"]["status"] == "sent"
+    assert by_to["jane@x.com"]["status"] == "failed"
+    assert "error" in by_to["jane@x.com"]
+
+
+def test_send_503_when_global_auth_error_aborts_batch(app, monkeypatch):
+    """RefreshError is global (auth, not transient) — re-raising it as
+    per-recipient errors would just spam the response. Abort with 503
+    immediately on the first auth failure."""
+    import google.auth.exceptions
+    from pipeline import gmail_client
+
+    client = app.test_client()
+    client.post("/api/enrichment/lookup/14000000000001")
+    with app.app_context():
+        from webapp.routes import _conn
+        with _conn() as conn:
+            conn.execute("INSERT INTO contacts(pin, email, source) "
+                         "VALUES ('14000000000001', 'jane@x.com', 'manual')")
+            conn.commit()
+    call_count = {"n": 0}
+    def revoked(**kw):
+        call_count["n"] += 1
+        raise google.auth.exceptions.RefreshError(
+            "invalid_grant: revoked", {"error": "invalid_grant"},
+        )
+    monkeypatch.setattr(gmail_client, "send_email", revoked)
+    app.config["GMAIL_SENDER_ADDRESS"] = "me@example.com"
+
+    r = client.post("/api/outreach/send", json={
+        "pin": "14000000000001",
+        "to_list": ["john@x.com", "jane@x.com"],
+        "subject": "hi", "body": "hello",
+        "touch_number": 1,
+    })
+    assert r.status_code == 503
+    assert call_count["n"] == 1, "auth failure must abort the batch, not try every recipient"

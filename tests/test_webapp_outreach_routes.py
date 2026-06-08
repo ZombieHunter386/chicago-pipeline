@@ -310,16 +310,19 @@ def test_send_outreach_calls_gmail_and_records_row(app_on, outreach_db_path) -> 
         )
     assert resp.status_code == 200, resp.get_data(as_text=True)
     data = resp.get_json()
-    assert data["outreach_id"] >= 1
-    assert data["gmail_message_id"] == "msg-1"
-    # Send was called with sanitized subject and the right addresses.
-    # T10: BCC fanout — the visible To: header is the sender; actual
-    # recipient(s) ride in bcc.
+    assert data["sent"] == 1 and data["failed"] == 0
+    assert len(data["results"]) == 1
+    only = data["results"][0]
+    assert only["to"] == "js@example.com"
+    assert only["status"] == "sent"
+    assert only["gmail_message_id"] == "msg-1"
+    assert only["outreach_id"] >= 1
+    # Send addresses the recipient directly — no BCC fan-out.
     assert send_mock.call_count == 1
     kwargs = send_mock.call_args.kwargs
     assert kwargs["sender"] == "me@example.com"
-    assert kwargs["to"] == "me@example.com"
-    assert kwargs["bcc"] == ["js@example.com"]
+    assert kwargs["to"] == "js@example.com"
+    assert kwargs.get("bcc") in (None, [])
     assert kwargs["subject"] == "Hi"
 
 
@@ -409,7 +412,7 @@ def test_mark_replied_updates_row(app_on, outreach_db_path: Path) -> None:
             "pin": "14210010010000", "to": "x@y.com",
             "subject": "s", "body": "b",
         })
-    oid = resp.get_json()["outreach_id"]
+    oid = resp.get_json()["results"][0]["outreach_id"]
 
     resp = client.post(f"/api/outreach/{oid}/mark-replied", json={
         "response_type": "responded"
@@ -502,7 +505,7 @@ def test_send_outreach_accepts_touch_number(app_on, outreach_db_path):
     conn = sqlite3.connect(outreach_db_path)
     row = conn.execute(
         "SELECT touch_number FROM outreach WHERE outreach_id = ?",
-        (resp.get_json()["outreach_id"],),
+        (resp.get_json()["results"][0]["outreach_id"],),
     ).fetchone()
     conn.close()
     assert row[0] == 2
@@ -532,7 +535,7 @@ def test_send_persists_gmail_message_id_to_dedicated_column(app_on, outreach_db_
             "subject": "s", "body": "b",
         })
     assert resp.status_code == 200
-    oid = resp.get_json()["outreach_id"]
+    oid = resp.get_json()["results"][0]["outreach_id"]
     conn = sqlite3.connect(outreach_db_path)
     row = conn.execute(
         "SELECT gmail_message_id, notes FROM outreach WHERE outreach_id = ?",
@@ -558,7 +561,7 @@ def test_send_outreach_defaults_touch_number_to_1(app_on, outreach_db_path):
     conn = sqlite3.connect(outreach_db_path)
     row = conn.execute(
         "SELECT touch_number FROM outreach WHERE outreach_id = ?",
-        (resp.get_json()["outreach_id"],),
+        (resp.get_json()["results"][0]["outreach_id"],),
     ).fetchone()
     conn.close()
     assert row[0] == 1
