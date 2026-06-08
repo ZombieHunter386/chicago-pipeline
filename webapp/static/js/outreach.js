@@ -217,7 +217,19 @@
         const text = await r.text();
         throw new Error(text);
       }
-      showToast('Trace complete', 'success');
+      // The endpoint returns 200 for both 'found contacts' and 'no_match'
+      // (provider returned cleanly with zero hits). Empty contacts is a
+      // legitimate-but-unhelpful result — don't claim success.
+      const data = await r.json();
+      const contacts = (data && data.contacts) || [];
+      if (contacts.length > 0) {
+        showToast(
+          `Trace complete — ${contacts.length} contact${contacts.length === 1 ? '' : 's'} found`,
+          'success',
+        );
+      } else {
+        showToast('No records found for this owner/address', 'info');
+      }
       window.dispatchEvent(new CustomEvent('outreach:refresh', {detail: {pin}}));
     } catch (e) {
       showToast(`Trace failed: ${e.message}`, 'error');
