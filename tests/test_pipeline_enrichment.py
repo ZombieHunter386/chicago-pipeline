@@ -107,6 +107,144 @@ class _RecordingProvider:
         )
 
 
+class _ScriptedProvider:
+    """Stub provider that returns a queued sequence of results, recording
+    each call's kwargs. Lets fallback tests assert on call order + payload."""
+    name = "stub"
+    cost_per_lookup_usd = 0.10
+
+    def __init__(self, results: list[EnrichmentResult]):
+        self.results = list(results)
+        self.calls: list[dict] = []
+
+    def lookup(self, **kwargs):
+        self.calls.append(kwargs)
+        if not self.results:
+            raise AssertionError("provider called more times than scripted")
+        return self.results.pop(0)
+
+
+def _seed_non_llc_parcel(db):
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO parcels(pin, owner_name, mail_address, zip_code, is_llc) "
+            "VALUES ('14192080160000', 'Resurrection Cov Ch', "
+            "'3901 N MARSHFIELD AVE', '60613', 0)"
+        )
+        conn.commit()
+
+
+def _run_enrich(db, pin="14192080160000", provider=None):
+    with sqlite3.connect(db) as conn:
+        conn.row_factory = sqlite3.Row
+        return _enrich_one_pin(conn, job_id=None, pin=pin, provider=provider)
+
+
+def test_normal_hit_does_not_trigger_advanced_fallback(tmp_path):
+    """If normal mode returns a hit (status='success' with contacts),
+    advanced mode is NOT called — single $0.10, single result row."""
+    db = tmp_path / "t.db"
+    init_db(db)
+    _seed_non_llc_parcel(db)
+    hit = EnrichmentResult(
+        contacts=[EnrichmentContact(
+            value="x@y.com", kind="email",
+            confidence_pct=None, source_label="stub:email:rank-1:via=Owner",
+        )],
+        raw_response_json="{}", cost_usd=0.10,
+        provider="stub", status="success", error_message=None,
+    )
+    provider = _ScriptedProvider([hit])
+    _run_enrich(db, provider=provider)
+    assert len(provider.calls) == 1, "no fallback when first call hits"
+    # First call was normal mode (carried first/last names)
+    assert provider.calls[0].get("owner_first_name") == "Resurrection"
+
+
+def test_normal_no_match_triggers_advanced_fallback(tmp_path):
+    """Normal-mode no_match auto-falls-back to advanced mode (address-only).
+    Saves both enrichment_results rows for audit transparency. Returns the
+    advanced result so the endpoint sees the contacts."""
+    db = tmp_path / "t.db"
+    init_db(db)
+    _seed_non_llc_parcel(db)
+    miss = EnrichmentResult(
+        contacts=[], raw_response_json="{}", cost_usd=0.0,
+        provider="stub", status="no_match", error_message=None,
+    )
+    hit = EnrichmentResult(
+        contacts=[EnrichmentContact(
+            value="real-resident@gmail.com", kind="email",
+            confidence_pct=None,
+            source_label="stub:email:rank-1:via=Actual Resident",
+        )],
+        raw_response_json="{}", cost_usd=0.10,
+        provider="stub", status="success", error_message=None,
+    )
+    provider = _ScriptedProvider([miss, hit])
+    result = _run_enrich(db, provider=provider)
+    assert len(provider.calls) == 2, "fallback fires when first call misses"
+    # First call was normal (had names); second was advanced (no names)
+    assert provider.calls[0].get("owner_first_name") == "Resurrection"
+    assert provider.calls[1].get("owner_first_name") in (None, "")
+    assert provider.calls[1].get("owner_last_name") in (None, "")
+    # Returned result is the advanced hit (so the endpoint's status check passes)
+    assert result.status == "success"
+    assert len(result.contacts) == 1
+    # Both enrichment_results rows persisted with distinct lookup_type
+    with sqlite3.connect(db) as conn:
+        rows = conn.execute(
+            "SELECT lookup_type, status FROM enrichment_results "
+            "WHERE pin='14192080160000' ORDER BY id"
+        ).fetchall()
+    assert [r[0] for r in rows] == ["skip_trace_normal", "skip_trace_advanced"]
+    assert [r[1] for r in rows] == ["no_match", "success"]
+
+
+def test_normal_and_advanced_both_miss(tmp_path):
+    """Both modes miss → 2 result rows, both no_match, no contacts persisted,
+    final result is no_match so the endpoint surfaces 'no records found'."""
+    db = tmp_path / "t.db"
+    init_db(db)
+    _seed_non_llc_parcel(db)
+    miss = EnrichmentResult(
+        contacts=[], raw_response_json="{}", cost_usd=0.0,
+        provider="stub", status="no_match", error_message=None,
+    )
+    provider = _ScriptedProvider([miss, miss])
+    result = _run_enrich(db, provider=provider)
+    assert len(provider.calls) == 2
+    assert result.status == "no_match"
+    assert result.contacts == []
+    with sqlite3.connect(db) as conn:
+        n_contacts = conn.execute(
+            "SELECT COUNT(*) FROM contacts WHERE pin='14192080160000'"
+        ).fetchone()[0]
+        n_results = conn.execute(
+            "SELECT COUNT(*) FROM enrichment_results WHERE pin='14192080160000'"
+        ).fetchone()[0]
+    assert n_contacts == 0
+    assert n_results == 2
+
+
+def test_normal_error_does_not_trigger_fallback(tmp_path):
+    """status='error' is a different failure mode (bad payload, auth, etc.)
+    — falling back wouldn't help and would just spam errors. Only no_match
+    triggers fallback."""
+    db = tmp_path / "t.db"
+    init_db(db)
+    _seed_non_llc_parcel(db)
+    err = EnrichmentResult(
+        contacts=[], raw_response_json='{"city":["required"]}', cost_usd=0.0,
+        provider="stub", status="error",
+        error_message='HTTP 400: {"city":["required"]}',
+    )
+    provider = _ScriptedProvider([err])
+    result = _run_enrich(db, provider=provider)
+    assert len(provider.calls) == 1, "errors are not retried as advanced"
+    assert result.status == "error"
+
+
 def test_enrich_one_pin_defaults_city_state_zip_for_chicago(tmp_path):
     """Cook County assessor mail_address is street-only ('3550 N LAKE SHORE DR')
     — no city/state/zip. _enrich_one_pin must hand the provider Chicago

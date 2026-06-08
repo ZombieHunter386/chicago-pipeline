@@ -274,8 +274,18 @@ def _enrich_one_pin(conn, job_id: int, pin: str,
     """Run one provider lookup for one pin and persist the results.
 
     Picks the lookup mode based on parcels.is_llc:
-      - is_llc=0 → split owner_name into first/last and call normal mode
-      - is_llc=1 → omit names, call advanced mode (address-only)
+      - is_llc=0 → split owner_name into first/last and call normal mode.
+        If normal returns no_match, automatically retry in advanced mode
+        (address-only) to catch stale/wrong assessor owner_name cases
+        (church entities, unit-suffix bleed, deceased owners). Cost is
+        $0 for the missed normal call + $0.10 only if advanced hits.
+      - is_llc=1 → omit names, call advanced mode (address-only) directly.
+
+    Both provider calls (when fallback fires) are persisted to
+    enrichment_results for audit — operator sees 'normal missed, advanced
+    succeeded' in the per-pin history. The returned EnrichmentResult is
+    the LAST result (the one that may have contacts), so the endpoint's
+    status check + the in-memory _persist_contacts call work the same.
 
     Returns the EnrichmentResult so the single-pin endpoint can surface
     provider errors (status='error') as HTTP 502 instead of silently
@@ -299,23 +309,41 @@ def _enrich_one_pin(conn, job_id: int, pin: str,
         default_state="IL",
         default_zip=parcel["zip_code"] or "",
     )
-    if parcel["is_llc"]:
-        result = provider.lookup(mail_address=mail, **defaults)
-        lookup_type = "skip_trace_advanced"
-    else:
-        first, last = split_owner_name(parcel["owner_name"] or "")
-        result = provider.lookup(
-            mail_address=mail,
-            owner_first_name=first, owner_last_name=last,
-            **defaults,
+
+    def _run_advanced() -> EnrichmentResult:
+        adv_result = provider.lookup(mail_address=mail, **defaults)
+        _save_enrichment_result(
+            conn, pin=pin, job_id=job_id, lookup_type="skip_trace_advanced",
+            query_name=parcel["owner_name"], query_mail_address=mail,
+            result=adv_result,
         )
-        lookup_type = "skip_trace_normal"
+        _persist_contacts(conn, pin, adv_result)
+        return adv_result
+
+    if parcel["is_llc"]:
+        return _run_advanced()
+
+    # Non-LLC: normal mode first, fall back to advanced on no_match.
+    first, last = split_owner_name(parcel["owner_name"] or "")
+    result = provider.lookup(
+        mail_address=mail,
+        owner_first_name=first, owner_last_name=last,
+        **defaults,
+    )
     _save_enrichment_result(
-        conn, pin=pin, job_id=job_id, lookup_type=lookup_type,
+        conn, pin=pin, job_id=job_id, lookup_type="skip_trace_normal",
         query_name=parcel["owner_name"], query_mail_address=mail,
         result=result,
     )
     _persist_contacts(conn, pin, result)
+
+    # Auto-fallback: stale/wrong owner_name often misses in normal mode
+    # but the address still has current residents. Tracerfy charges per
+    # hit ($0 on miss), so retrying costs nothing extra unless advanced
+    # actually finds someone. Only no_match triggers fallback —
+    # status='error' is a different failure mode that wouldn't benefit.
+    if result.status == "no_match":
+        return _run_advanced()
     return result
 
 
