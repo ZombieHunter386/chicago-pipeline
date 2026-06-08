@@ -51,6 +51,109 @@ def test_derive_adu_eligible_handles_case_insensitive_zone():
 
 
 @responses.activate
+def test_apply_to_parcels_sets_adu_eligible_and_restriction_text(tmp_path):
+    """After fetch + apply_to_parcels:
+      - RT/RM/B/C1/C2 parcels: adu_eligible=1, restriction_text=NULL (citywide)
+      - RS parcels inside a polygon: adu_eligible=1, restriction_text=polygon's Text
+      - RS parcels outside polygons: adu_eligible=0, restriction_text=NULL
+      - M/PD/etc. parcels: adu_eligible=0, restriction_text=NULL
+      - adu_has_annual_limits is 1 iff restriction_text contains 'Annual Limits'.
+    """
+    from sources.chicago_adu_zones import fetch, apply_to_parcels, ARCGIS_QUERY_URL
+
+    db_path = tmp_path / "t.db"
+    init_db(db_path)
+
+    fx = json.loads((FIXTURES / "chicago_adu_zones.json").read_text())
+    responses.add(responses.GET, ARCGIS_QUERY_URL, json=fx, status=200)
+    fetch(db_path)
+
+    # Get a point INSIDE the first polygon for the RS-in-polygon test.
+    from shapely import wkt as wkt_lib
+    conn = get_connection(db_path)
+    first_polygon_wkt = conn.execute(
+        "SELECT polygon_wkt FROM raw_chicago_adu_zones LIMIT 1"
+    ).fetchone()["polygon_wkt"]
+    inside = wkt_lib.loads(first_polygon_wkt).representative_point()
+    inside_lat, inside_lng = inside.y, inside.x
+
+    test_parcels = [
+        # (pin, zone_class, lat, lng, expected_eligible, expected_restriction_substr)
+        ("00000000000001", "RT-4",  41.95, -87.65, 1, None),
+        ("00000000000002", "B3-2",  41.95, -87.65, 1, None),
+        ("00000000000003", "C1-2",  41.95, -87.65, 1, None),
+        ("00000000000004", "RS-3",  inside_lat, inside_lng, 1, "set"),
+        ("00000000000005", "RS-3",  41.95, -87.65, 0, None),
+        ("00000000000006", "M1-2",  41.95, -87.65, 0, None),
+        ("00000000000007", "PD 853", 41.95, -87.65, 0, None),
+    ]
+    for pin, zc, lat, lng, _, _ in test_parcels:
+        conn.execute(
+            "INSERT INTO parcels(pin, pin10, zone_class, lat, lng) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (pin, pin[:10], zc, lat, lng),
+        )
+    conn.commit()
+    conn.close()
+
+    apply_to_parcels(db_path)
+
+    conn = get_connection(db_path)
+    for pin, _, _, _, expected_eligible, expected_restriction in test_parcels:
+        row = conn.execute(
+            "SELECT adu_eligible, adu_restriction_text, adu_has_annual_limits "
+            "FROM parcels WHERE pin=?", (pin,)
+        ).fetchone()
+        assert row["adu_eligible"] == expected_eligible, \
+            f"pin {pin}: expected adu_eligible={expected_eligible}, got {row['adu_eligible']}"
+        if expected_restriction is None:
+            assert row["adu_restriction_text"] is None, \
+                f"pin {pin}: expected NULL restriction, got {row['adu_restriction_text']!r}"
+        else:
+            assert row["adu_restriction_text"], \
+                f"pin {pin}: expected restriction text to be set"
+    conn.close()
+
+
+@responses.activate
+def test_apply_to_parcels_sets_has_annual_limits_flag(tmp_path):
+    """adu_has_annual_limits is derived from restriction_text containing
+    'Annual Limits'."""
+    from sources.chicago_adu_zones import fetch, apply_to_parcels, ARCGIS_QUERY_URL
+    db_path = tmp_path / "t.db"
+    init_db(db_path)
+    fx = json.loads((FIXTURES / "chicago_adu_zones.json").read_text())
+    responses.add(responses.GET, ARCGIS_QUERY_URL, json=fx, status=200)
+    fetch(db_path)
+
+    from shapely import wkt as wkt_lib
+    conn = get_connection(db_path)
+    row = conn.execute(
+        "SELECT polygon_wkt FROM raw_chicago_adu_zones "
+        "WHERE restriction_text LIKE '%Annual Limits%' LIMIT 1"
+    ).fetchone()
+    if row is None:
+        pytest.skip("fixture has no polygon with 'Annual Limits'")
+    pt = wkt_lib.loads(row["polygon_wkt"]).representative_point()
+    conn.execute(
+        "INSERT INTO parcels(pin, pin10, zone_class, lat, lng) "
+        "VALUES ('00000000000010', '0000000000', 'RS-3', ?, ?)",
+        (pt.y, pt.x),
+    )
+    conn.commit()
+    conn.close()
+
+    apply_to_parcels(db_path)
+
+    conn = get_connection(db_path)
+    flag = conn.execute(
+        "SELECT adu_has_annual_limits FROM parcels WHERE pin='00000000000010'"
+    ).fetchone()[0]
+    assert flag == 1
+    conn.close()
+
+
+@responses.activate
 def test_fetch_writes_polygons_to_raw_table(tmp_path):
     """Fetching the ArcGIS layer persists each feature as a row in
     raw_chicago_adu_zones with zone_id, restriction_text, polygon_wkt."""

@@ -25,6 +25,7 @@ from pathlib import Path
 import requests
 from shapely.geometry import Point, shape
 from shapely import wkt as wkt_lib
+from shapely.validation import make_valid
 
 from pipeline.db import get_connection
 
@@ -151,7 +152,10 @@ def apply_to_parcels(db_path: Path) -> int:
             {
                 "zone_id": r["zone_id"],
                 "restriction_text": r["restriction_text"],
-                "geom": wkt_lib.loads(r["polygon_wkt"]),
+                # make_valid() fixes self-intersecting rings that ArcGIS REST
+                # sometimes exports. Without it, contains() silently returns
+                # False on invalid polygons even for interior points.
+                "geom": make_valid(wkt_lib.loads(r["polygon_wkt"])),
             }
             for r in conn.execute(
                 "SELECT zone_id, restriction_text, polygon_wkt "
