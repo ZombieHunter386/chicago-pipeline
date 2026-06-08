@@ -190,6 +190,56 @@ def score_parcels(db_path: Path, scoring_config: ScoringConfig) -> int:
         conn.close()
 
 
+def score_parcels_multi(
+    db_path: Path,
+    profile_configs: list[tuple[str, ScoringConfig, str]],
+) -> dict[str, int]:
+    """Run scoring over every parcel for each registered profile.
+
+    profile_configs: list of (profile_name, ScoringConfig, score_column_name).
+    Each profile writes its computed score to the named column. Engine
+    iterates parcels once per profile (separate UPDATE statements) —
+    simple, easy to debug, fine for the 67k-parcel scale.
+
+    Returns {profile_name: n_parcels_scored}.
+
+    Per the spec, this engine does NOT filter parcels. Every parcel gets
+    every profile's score. Filtering happens in the UI layer at query time.
+    """
+    counts: dict[str, int] = {}
+    for profile_name, scoring_config, column in profile_configs:
+        n = _score_one_profile(db_path, scoring_config, column)
+        counts[profile_name] = n
+    return counts
+
+
+def _score_one_profile(
+    db_path: Path,
+    scoring_config: "ScoringConfig",
+    column: str,
+) -> int:
+    """Compute the per-profile score for every parcel and write to `column`."""
+    conn = get_connection(db_path)
+    try:
+        signal_cols = [s.signal for s in scoring_config.signals]
+        select_cols = ", ".join(["pin"] + signal_cols)
+        rows = conn.execute(f"SELECT {select_cols} FROM parcels").fetchall()
+        n = 0
+        for r in rows:
+            parcel_dict = dict(r)
+            pin = parcel_dict["pin"]
+            score_value = score_parcel(parcel_dict, scoring_config)
+            conn.execute(
+                f"UPDATE parcels SET {column} = ? WHERE pin = ?",
+                (score_value, pin),
+            )
+            n += 1
+        conn.commit()
+        return n
+    finally:
+        conn.close()
+
+
 def score_consolidation_groups(db_path: Path,
                                scoring_config: ScoringConfig) -> int:
     """Score every consolidation group; UPDATE score + score_version per row.
