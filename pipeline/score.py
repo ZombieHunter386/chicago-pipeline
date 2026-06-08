@@ -121,6 +121,34 @@ def score_parcel(parcel_row: dict, scoring_config: ScoringConfig) -> float:
     return round(total * 100, 4)
 
 
+def derive_last_sale_price_recent(db_path: Path) -> int:
+    """Write parcels.last_sale_price_recent = last_sale_price when the
+    parcel transacted in the last 3 years (hold_duration_years <= 3),
+    else NULL.
+
+    Stale or missing sale-price data → NULL, which the scoring engine
+    treats as the neutral 0.5 value (no penalty, no reward) on
+    continuous signals. Lets the affordability signal apply only where
+    we actually know what the parcel sold for recently.
+
+    Returns the number of rows updated.
+    """
+    conn = get_connection(db_path)
+    try:
+        cur = conn.execute(
+            "UPDATE parcels SET last_sale_price_recent = "
+            "  CASE WHEN hold_duration_years IS NOT NULL "
+            "       AND hold_duration_years <= 3 "
+            "       AND last_sale_price IS NOT NULL "
+            "       THEN last_sale_price "
+            "       ELSE NULL END"
+        )
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
 def score_parcels(db_path: Path, scoring_config: ScoringConfig) -> int:
     """Score every eligible parcel in the DB; UPDATE score + score_version per row.
 
