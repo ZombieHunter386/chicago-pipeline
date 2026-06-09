@@ -43,14 +43,32 @@
   // overwriting keys the user has already set. Scalar and complex object
   // values (between, not_null, prefix_in, in, min, max) are all supported
   // now that _build_where handles them on the backend.
+  //
+  // {between: [a, b]} gets normalised to {min: a, max: b} so the range
+  // filter control can populate its min/max inputs natively.
   function mergeRecommendedFilters(recommended) {
     for (const [col, val] of Object.entries(recommended || {})) {
       if (col in window.FilterState.filters) continue; // user-set wins
-      // Normalise: 1/0 integers → booleans for boolean columns
       if (val === 1) window.FilterState.filters[col] = true;
       else if (val === 0) window.FilterState.filters[col] = false;
-      else window.FilterState.filters[col] = val;
+      else if (val && typeof val === 'object' && Array.isArray(val.between)) {
+        window.FilterState.filters[col] = {min: val.between[0], max: val.between[1]};
+      } else {
+        window.FilterState.filters[col] = val;
+      }
     }
+  }
+
+  // Auto-expand the filter panel so the user can see the just-applied
+  // profile filters without having to click the toggle. Idempotent.
+  function expandFilterPanel() {
+    const panel = document.getElementById('filter-panel');
+    const btn = document.getElementById('filter-toggle');
+    if (!panel || !btn || panel.classList.contains('open')) return;
+    panel.classList.add('open');
+    const arrow = btn.querySelector('.arrow');
+    if (arrow) arrow.textContent = '▾';
+    btn.setAttribute('aria-expanded', 'true');
   }
 
   async function init() {
@@ -87,6 +105,10 @@
       if (window.filtersReady && typeof window.filtersReady.then === 'function') {
         window.filtersReady.then(() => {
           mergeRecommendedFilters(registry[saved] && registry[saved].recommended_filters);
+          // Refresh the visible filter controls so the auto-merged values appear.
+          if (typeof window.refreshFilterPanel === 'function') {
+            window.refreshFilterPanel();
+          }
         });
       }
     }
@@ -97,6 +119,12 @@
         localStorage.setItem('selectedProfile', name);
         window.FilterState.profile = name;
         mergeRecommendedFilters(registry[name] && registry[name].recommended_filters);
+        // Refresh the visible filter controls + auto-expand the panel so the
+        // user sees the applied filters immediately.
+        if (typeof window.refreshFilterPanel === 'function') {
+          window.refreshFilterPanel();
+        }
+        expandFilterPanel();
       } else {
         window.FilterState.profile = null;
       }

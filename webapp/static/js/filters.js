@@ -22,6 +22,10 @@ window.filtersReady = (async function initFilters() {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const schema = await resp.json();
 
+    // Cache the schema so app.js can trigger a re-render after profile-level
+    // auto-applied filters merge into FilterState — see window.refreshFilterPanel.
+    window.FilterSchema = schema;
+
     renderStagePills(schema.stage_pills);
     renderFilterPanel(schema.filter_groups);
     wireFilterToggle();
@@ -37,6 +41,15 @@ window.filtersReady = (async function initFilters() {
     }
   }
 })();
+
+// Re-render the filter panel from the cached schema, so visual controls
+// reflect the current FilterState (e.g., after profile-level auto-merge).
+// Called by app.js after mergeRecommendedFilters.
+window.refreshFilterPanel = function() {
+  if (!window.FilterSchema) return;
+  renderFilterPanel(window.FilterSchema.filter_groups);
+  updateActiveCount();
+};
 
 function renderStagePills(cfg) {
   const container = document.getElementById('stage-pills');
@@ -80,12 +93,65 @@ function renderFilterPanel(groups) {
   });
 }
 
+// Render a small removable chip showing an active complex operator
+// (not_null, prefix_in, in) that doesn't fit the underlying control type.
+// Used for profile-auto-applied filters so the user can see them and
+// click × to remove. Returns null if the value has no complex operators.
+function renderOperatorChip(col, val, labelText) {
+  if (!val || typeof val !== 'object' || Array.isArray(val)) return null;
+  const complexOps = ['not_null', 'prefix_in', 'in', 'between'];
+  const op = complexOps.find(k => k in val);
+  if (!op) return null;
+
+  // Skip 'between' chips when the merge code has already converted them
+  // into {min, max} (which the range control handles natively).
+  if (op === 'between') return null;
+
+  let chipText;
+  if (op === 'not_null') {
+    chipText = `${labelText}: has value`;
+  } else if (op === 'prefix_in') {
+    const prefixes = (val.prefix_in || []).map(p => `${p}*`).join(', ');
+    chipText = `${labelText}: ${prefixes}`;
+  } else if (op === 'in') {
+    chipText = `${labelText}: ${(val.in || []).join(', ')}`;
+  }
+
+  const chip = document.createElement('div');
+  chip.className = 'filter-chip';
+  chip.innerHTML = `
+    <span>${escapeHtml(chipText)}</span>
+    <button type="button" class="filter-chip-close" aria-label="Remove ${escapeHtml(labelText)} filter">×</button>
+  `;
+  chip.querySelector('button').onclick = () => {
+    // Remove the complex operator only (preserve any min/max that may
+    // coexist in the same value object — unlikely but possible).
+    if (Object.keys(val).length === 1) {
+      delete window.FilterState.filters[col];
+    } else {
+      delete val[op];
+      window.FilterState.filters[col] = val;
+    }
+    window.refreshFilterPanel();
+    window.dispatchEvent(new CustomEvent('filterchange'));
+  };
+  return chip;
+}
+
 function renderFilter(f) {
   const ctrl = document.createElement('div');
   ctrl.className = 'filter-control';
   const col = f.column;
   const colAttr = escapeHtml(col);
   const labelText = escapeHtml(f.label);
+  // Current FilterState value for this column — drives pre-population
+  // of the control when the panel is (re-)rendered.
+  const cur = window.FilterState.filters[col];
+
+  // Chip for non-range complex operators (not_null, prefix_in, in)
+  // shown above the regular control. Only renders if applicable.
+  const chip = renderOperatorChip(col, cur, f.label);
+  if (chip) ctrl.appendChild(chip);
 
   if (f.type === 'checkbox') {
     ctrl.style.flexDirection = 'column';
@@ -102,6 +168,15 @@ function renderFilter(f) {
       </div>
     `;
     const buttons = ctrl.querySelectorAll('.tristate-btn');
+    // Pre-select the active button to mirror FilterState.
+    if (cur === true || cur === false) {
+      const activeVal = cur ? 'true' : 'false';
+      buttons.forEach(b => {
+        const isActive = b.dataset.value === activeVal;
+        b.classList.toggle('active', isActive);
+        b.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+      });
+    }
     buttons.forEach(btn => {
       btn.onclick = () => {
         buttons.forEach(b => {
@@ -135,16 +210,21 @@ function renderFilter(f) {
         <input type="number" id="${maxId}" class="filter-input" placeholder="Max" data-col="${colAttr}" data-bound="max">
       </div>
     `;
+    // Pre-fill min/max inputs from FilterState if present.
+    if (cur && typeof cur === 'object' && !Array.isArray(cur)) {
+      if (cur.min != null) ctrl.querySelector(`#${minId}`).value = cur.min;
+      if (cur.max != null) ctrl.querySelector(`#${maxId}`).value = cur.max;
+    }
     ctrl.querySelectorAll('input').forEach(i => {
       i.onchange = (e) => {
         const c = e.target.dataset.col;
         const bound = e.target.dataset.bound;
         const val = e.target.value === '' ? null : parseFloat(e.target.value);
-        const cur = window.FilterState.filters[c] || {};
-        if (val === null) delete cur[bound];
-        else cur[bound] = val;
-        if (Object.keys(cur).length === 0) delete window.FilterState.filters[c];
-        else window.FilterState.filters[c] = cur;
+        const next = window.FilterState.filters[c] || {};
+        if (val === null) delete next[bound];
+        else next[bound] = val;
+        if (Object.keys(next).length === 0) delete window.FilterState.filters[c];
+        else window.FilterState.filters[c] = next;
         updateActiveCount();
         window.dispatchEvent(new CustomEvent('filterchange'));
       };
@@ -179,6 +259,11 @@ function renderFilter(f) {
       select.appendChild(opt);
     });
 
+    // Pre-select the option matching FilterState (scalar single value).
+    if (typeof cur === 'string') {
+      select.value = cur;
+    }
+
     select.onchange = (e) => {
       const c = e.target.dataset.col;
       if (e.target.value === '') delete window.FilterState.filters[c];
@@ -209,6 +294,7 @@ function renderFilter(f) {
     box.style.width = '100%';
     box.style.boxSizing = 'border-box';
 
+    const preCheckedSet = new Set(Array.isArray(cur) ? cur : []);
     (f.options || []).forEach(o => {
       const row = document.createElement('label');
       row.style.display = 'flex';
@@ -222,6 +308,7 @@ function renderFilter(f) {
       cb.type = 'checkbox';
       cb.value = o;
       cb.dataset.col = col;
+      cb.checked = preCheckedSet.has(o);
       cb.addEventListener('change', () => {
         const checked = [...box.querySelectorAll('input:checked')].map(i => i.value);
         if (checked.length === 0) delete window.FilterState.filters[col];
@@ -245,7 +332,12 @@ function renderFilter(f) {
       <label for="${txtId}" style="font-size:10px; color:#8b949e;">${labelText}</label>
       <input type="text" id="${txtId}" class="filter-input" style="width:100%;" placeholder="Search…" data-col="${colAttr}">
     `;
-    ctrl.querySelector('input').onchange = (e) => {
+    const txtInput = ctrl.querySelector('input');
+    // Pre-fill from FilterState if it's a string.
+    if (typeof cur === 'string') {
+      txtInput.value = cur;
+    }
+    txtInput.onchange = (e) => {
       const c = e.target.dataset.col;
       if (e.target.value === '') delete window.FilterState.filters[c];
       else window.FilterState.filters[c] = e.target.value;
