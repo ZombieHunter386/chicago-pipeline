@@ -33,7 +33,7 @@ def main() -> None:
     # ALTER TABLE no-ops if the column exists. Without this, pulling code that
     # adds a column leaves the dev DB out of sync until someone re-runs init_db
     # manually — the failure mode is a 500 on the first query that touches the
-    # new column. Prod (wsgi.py) does its own migration handling.
+    # new column. Prod (wsgi.py) runs the same init_db at startup.
     init_db(args.db)
 
     # Outreach config reads from env so a developer can override paths without

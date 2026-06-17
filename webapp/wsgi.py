@@ -16,10 +16,22 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from pipeline.db import init_db
 from webapp.app import create_app
 
 
 _db_path = Path(os.environ.get("DB_PATH", "data/full.alt.db"))
+
+# Run pending schema migrations (_LATER_COLUMNS) against the deployed DB
+# before serving any request. The DB on the persistent volume is downloaded
+# once from DB_DOWNLOAD_URL (see scripts/init_db.sh) and never re-created, so
+# when a deploy adds a column the old DB lacks it — and the first query that
+# SELECTs the new column (e.g. /api/parcels selects score_adu/score_redev)
+# raises "no such column", which the global error handler turns into a 500
+# and the UI renders as "no properties". init_db's ALTER TABLE ADD COLUMN is
+# idempotent and metadata-only (instant, non-destructive), so it is safe to
+# run on every boot. Mirrors the migration __main__.py runs for local dev.
+init_db(_db_path)
 _scoring_yaml_env = os.environ.get("SCORING_YAML_PATH")
 _scoring_yaml_path = Path(_scoring_yaml_env) if _scoring_yaml_env else None
 _feature_outreach = os.environ.get("FEATURE_OUTREACH", "").lower() in {"true", "1"}
