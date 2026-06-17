@@ -267,3 +267,23 @@ DB has outreach data:
 If you re-fetched from upstream (`pipeline.fetch_all → cleanup → consolidate
 → condo_rollup → score`) on a clean DB that never had outreach rows, you can
 skip step 1 — but running the sanitize step on every upload is a safe habit.
+
+### Re-scoring without re-fetching
+
+If you only changed scoring weights (`config/scoring.yaml`,
+`config/scoring_adu.yaml`, `config/scoring_redev.yaml`) and want to refresh the
+score columns on an existing DB — no upstream re-fetch needed:
+
+```bash
+# Re-score every registered profile (value_add → score, adu → score_adu,
+# redev → score_redev) using config/profile_defaults.yaml as the registry.
+.venv/bin/python -m pipeline.score --db data/full.alt.db --all-profiles
+
+# value_add weights also drive consolidation-group scores; refresh those too:
+.venv/bin/python -m pipeline.score --db data/full.alt.db --scoring-yaml config/scoring.yaml
+```
+
+Then sanitize + upload + wipe the volume as above. The deployed app also runs
+`init_db` at startup (webapp/wsgi.py), so a stale volume DB gains any *new*
+score columns on boot — but their values stay NULL until you upload a
+freshly-scored DB via this path.

@@ -13,8 +13,10 @@ from pathlib import Path
 
 import yaml
 
+from pipeline.config import CONFIG_DIR
 from pipeline.consolidation_features import derive_group_features
 from pipeline.db import get_connection
+from pipeline.profile_defaults import load_profile_defaults
 
 
 @dataclass(frozen=True)
@@ -309,16 +311,50 @@ def score(db_path: Path, scoring_yaml_path: Path) -> None:
           f"with version {cfg.version}")
 
 
+def score_all_profiles(db_path: Path, config_dir: Path = CONFIG_DIR) -> dict[str, int]:
+    """Re-score every parcel for every profile registered in
+    profile_defaults.yaml, writing each profile's value to its score_column
+    (value_add → score, adu → score_adu, redev → score_redev).
+
+    Use this to refresh an existing DB after editing scoring weights, without
+    re-running the full fetch_all pipeline. Mirrors fetch_all's scoring step
+    exactly (score_parcels_multi over the same registry) — it does NOT touch
+    consolidation_groups; refresh those via the single-profile path
+    (--scoring-yaml config/scoring.yaml) when group weights change.
+
+    Returns {profile_name: n_parcels_scored}.
+    """
+    profiles = load_profile_defaults(config_dir / "profile_defaults.yaml")
+    profile_configs = [
+        (name, load_scoring_config(config_dir / body["yaml"]), body["score_column"])
+        for name, body in profiles.items()
+    ]
+    return score_parcels_multi(db_path, profile_configs)
+
+
 def _cli(argv: list[str] | None = None) -> int:
     import argparse
     p = argparse.ArgumentParser(prog="pipeline.score",
                                 description="Apply scoring weights to every parcel.")
     p.add_argument("--db", required=True, type=Path,
                    help="Path to the SQLite DB (e.g. data/full.db).")
-    p.add_argument("--scoring-yaml", required=True, type=Path,
-                   help="Path to config/scoring.yaml.")
+    mode = p.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--scoring-yaml", type=Path,
+                      help="Score the single value_add profile (writes `score` + "
+                           "consolidation-group scores) from this YAML.")
+    mode.add_argument("--all-profiles", action="store_true",
+                      help="Re-score every profile in profile_defaults.yaml "
+                           "(value_add, adu, redev) against an existing DB.")
+    p.add_argument("--config-dir", type=Path, default=CONFIG_DIR,
+                   help="Directory holding profile_defaults.yaml + the per-profile "
+                        "scoring YAMLs (default: repo config/).")
     args = p.parse_args(argv)
-    score(db_path=args.db, scoring_yaml_path=args.scoring_yaml)
+    if args.all_profiles:
+        counts = score_all_profiles(args.db, args.config_dir)
+        for name, n in counts.items():
+            print(f"Scored {n:,} parcels for profile {name!r}")
+    else:
+        score(db_path=args.db, scoring_yaml_path=args.scoring_yaml)
     return 0
 
 
